@@ -20,7 +20,7 @@ else if (command === "propose") await propose(args[0], args.includes("--submit")
 else if (command === "update") await update(args.includes("--quiet"));
 else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();
 else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();
-else if (command === "self-test") selfTest();
+else if (command === "self-test") await selfTest();
 else fail("Использование:\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
 
 async function install(slug, { update = false, quiet = false } = {}) {
@@ -50,6 +50,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     if (!configured.marketplaces?.some((marketplace) => marketplace.name === "hobbyka-hub")) run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
     run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
+    await runPostUpdateHook(pluginRoot);
     const downloadId = response.headers.get("x-hobbyka-download-id");
     if (!downloadId) fail("Hub не вернул идентификатор загрузки.");
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) }, quiet);
@@ -83,6 +84,7 @@ async function update(quiet = false) {
     .map((plugin) => ({ slug: plugin.name, version: plugin.version }));
   const pending = installed.filter((local) => remote.some((plugin) => plugin.slug === local.slug && plugin.version !== local.version)).sort((left, right) => left.slug === "hobbyka-hub" ? 1 : right.slug === "hobbyka-hub" ? -1 : left.slug.localeCompare(right.slug));
   for (const plugin of pending) await install(plugin.slug, { update: true, quiet });
+  for (const plugin of installed.filter((local) => !pending.some((plugin) => plugin.slug === local.slug))) await runPostUpdateHook(join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", plugin.slug));
   if (!quiet) console.log(pending.length ? `Обновлено плагинов: ${pending.length}.` : "Установленные плагины из ХАБа уже актуальны.");
 }
 
@@ -200,6 +202,12 @@ async function writeMarketplace(codexRoot) {
 }
 
 async function directories(root) { try { return (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name); } catch { return []; } }
+async function runPostUpdateHook(pluginRoot, ...args) {
+  const hook = join(pluginRoot, ".codex-plugin", "post-update.mjs");
+  try { await access(hook); } catch (error) { if (error?.code === "ENOENT") return false; throw error; }
+  run(process.execPath, [hook, ...args], pluginRoot);
+  return true;
+}
 function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug)); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
 function listArchive(archive) { return platform() !== "win32" ? capture("unzip", ["-Z1", archive]) : capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries | ForEach-Object {$_.FullName}} finally {$z.Dispose()}", archive]); }
 function extractArchive(archive, target) { if (platform() !== "win32") return run("unzip", ["-q", archive, "-d", target]); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force", archive, target]); }
@@ -213,5 +221,21 @@ function run(executable, args, cwd, allowFailure = false) { const result = spawn
 function capture(executable, args) { const result = spawnSync(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
-function selfTest() { if (!macPlist("/path/node", "/path/updater").includes("<integer>900</integer>")) throw new Error("macOS schedule failed"); if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs").includes("update --quiet")) throw new Error("Windows schedule failed"); if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed"); if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed"); if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed"); if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed"); console.log("hobbyka-hub self-test: ok"); }
+async function selfTest() {
+  if (!macPlist("/path/node", "/path/updater").includes("<integer>900</integer>")) throw new Error("macOS schedule failed");
+  if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs").includes("update --quiet")) throw new Error("Windows schedule failed");
+  if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
+  if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
+  if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
+  if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
+  const fixture = await mkdtemp(join(tmpdir(), "hobbyka-hook-test-"));
+  try {
+    await mkdir(join(fixture, ".codex-plugin"));
+    await writeFile(join(fixture, ".codex-plugin", "post-update.mjs"), "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], 'ok');\n");
+    const marker = join(fixture, "ran");
+    await runPostUpdateHook(fixture, marker);
+    if (await readFile(marker, "utf8") !== "ok") throw new Error("post-update hook failed");
+  } finally { await rm(fixture, { recursive: true, force: true }); }
+  console.log("hobbyka-hub self-test: ok");
+}
 function fail(message) { console.error(message); process.exit(1); }
