@@ -1,0 +1,20 @@
+{
+  "name": "hobbyka-hub",
+  "version": "0.4.3",
+  "description": "Установка, обновление, публикация и предложения изменений для плагинов Hobbyka Hub.",
+  "author": { "name": "Hobbyka" },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Hobbyka Hub",
+    "shortDescription": "Установить, обновить или предложить изменение плагина.",
+    "developerName": "Hobbyka",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write"],
+    "brandColor": "#FBC40A",
+    "defaultPrompt": [
+      "Установи плагин <slug> из Hobbyka Hub.",
+      "Опубликуй папку моего готового плагина в Hobbyka Hub.",
+      "Подготовь локальную копию плагина <slug> и предложи изменения через PR."
+    ]
+  }
+}

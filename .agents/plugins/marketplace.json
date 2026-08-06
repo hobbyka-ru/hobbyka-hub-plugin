@@ -1,0 +1,12 @@
+{
+  "name": "hobbyka-hub",
+  "interface": { "displayName": "Hobbyka Hub" },
+  "plugins": [
+    {
+      "name": "hobbyka-hub",
+      "source": { "source": "local", "path": "./plugins/hobbyka-hub" },
+      "policy": { "installation": "AVAILABLE" },
+      "category": "Productivity"
+    }
+  ]
+}
