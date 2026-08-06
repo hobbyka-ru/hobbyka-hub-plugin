@@ -1,12 +1,13 @@
 {
   "name": "hobbyka-hub",
-  "version": "0.4.11",
+  "version": "0.4.12",
   "description": "Установка, обновление, публикация и предложения изменений для плагинов Hobbyka Hub.",
   "author": { "name": "Hobbyka" },
   "skills": "./skills/",
   "interface": {
     "displayName": "Hobbyka Hub",
     "shortDescription": "Установить, обновить или предложить изменение плагина.",
+    "longDescription": "Устанавливает и обновляет внутренние плагины Хоббики, публикует готовые плагины и отправляет предложения изменений.",
     "developerName": "Hobbyka",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],

@@ -2,7 +2,7 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { homedir, platform, tmpdir } from "node:os";
+import { arch, homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Readable, Transform } from "node:stream";
@@ -29,7 +29,7 @@ else fail("Использование:\n  hobbyka-hub install <slug>\n  hobbyka-
 
 async function install(slug, { update = false, quiet = false } = {}) {
   if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");
-  const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}`, undefined, quiet);
+  const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}&target=${platformTarget()}`, undefined, quiet);
   if (!response) return;
   if (!response.ok) fail(await response.text());
 
@@ -249,6 +249,7 @@ function extractArchive(archive, target) { if (platform() !== "win32") return ru
 function createArchive(root, archive) { if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$items=Get-ChildItem -LiteralPath $args[0] -Force | Where-Object {$_.Name -notin @('.git','node_modules','.DS_Store','.hobbyka-proposal.json')}; Compress-Archive -Path $items.FullName -DestinationPath $args[1] -Force", root, archive]); }
 function isSafeEntry(entry) { const path = entry.replaceAll("\\", "/"); return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) && !path.includes("\0") && !path.split("/").includes(".."); }
 function codexCommand() { return process.env.HOBBYKA_CODEX_COMMAND || (platform() === "win32" ? "codex.cmd" : "codex"); }
+function platformTarget(os = platform(), cpu = arch()) { return `${os === "win32" ? "windows" : os}-${cpu === "x64" ? "amd64" : cpu}`; }
 function resolveCodexCommand() { const command = codexCommand(); if (command.includes("/") || command.includes("\\")) return command; const result = spawnSync(platform() === "win32" ? "where.exe" : "which", [command], { encoding: "utf8" }); if (result.status !== 0) fail("Не найден исполняемый файл Codex."); return result.stdout.trim().split(/\r?\n/)[0]; }
 function xml(value) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
 function macPlist(node, updater, codex) { return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>ru.hobbyka.hub-updater</string><key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(updater)}</string><string>update</string><string>--quiet</string></array><key>EnvironmentVariables</key><dict><key>HOBBYKA_CODEX_COMMAND</key><string>${xml(codex)}</string></dict><key>StartInterval</key><integer>900</integer><key>RunAtLoad</key><true/></dict></plist>\n`; }
@@ -258,6 +259,7 @@ function capture(executable, args) { const result = spawnSync(executable, args, 
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
+  if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
   if (!macPlist("/path/node", "/path/updater", "/path/codex").includes("<integer>900</integer>") || !macPlist("/path/node", "/path/updater", "/path/codex").includes("HOBBYKA_CODEX_COMMAND</key><string>/path/codex")) throw new Error("macOS schedule failed");
   if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("HOBBYKA_CODEX_COMMAND") || !windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("update --quiet")) throw new Error("Windows schedule failed");
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
