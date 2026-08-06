@@ -91,11 +91,12 @@ async function update(quiet = false) {
 
 async function updatePublicHub(quiet) {
   const pluginRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", "hobbyka-hub");
+  const cacheBuster = Date.now();
   let latest;
-  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json`)).json(); } catch { return false; }
+  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
   const current = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
-  const response = await fetch(`${publicHub}/archive/refs/heads/main.zip`);
+  const response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" });
   if (!response.ok) { if (!quiet) fail("Не удалось скачать обновление Hobbyka Hub."); return false; }
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-self-update-"));
   try {
