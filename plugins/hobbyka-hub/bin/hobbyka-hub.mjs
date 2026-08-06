@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
-import { access, chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -14,6 +14,7 @@ if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
 
 const [command, ...args] = process.argv.slice(2);
 const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\/$/, "");
+const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
 if (command === "install") await install(args[0]);
 else if (command === "publish") await publish(args[0]);
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
@@ -64,6 +65,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
 }
 
 async function update(quiet = false) {
+  await updatePublicHub(quiet);
   let response;
   response = await hubFetch(`${base}/api/plugins`, undefined, quiet);
   if (!response) return;
@@ -86,6 +88,33 @@ async function update(quiet = false) {
   for (const plugin of pending) await install(plugin.slug, { update: true, quiet });
   for (const plugin of installed.filter((local) => !pending.some((plugin) => plugin.slug === local.slug))) await runPostUpdateHook(join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", plugin.slug));
   if (!quiet) console.log(pending.length ? `Обновлено плагинов: ${pending.length}.` : "Установленные плагины из ХАБа уже актуальны.");
+}
+
+async function updatePublicHub(quiet) {
+  const pluginRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", "hobbyka-hub");
+  let latest;
+  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json`)).json(); } catch { return false; }
+  const current = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  if (latest.version === current.version) return false;
+  const response = await fetch(`${publicHub}/archive/refs/heads/main.zip`);
+  if (!response.ok) { if (!quiet) fail("Не удалось скачать обновление Hobbyka Hub."); return false; }
+  const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-self-update-"));
+  try {
+    const archive = join(temp, "hobbyka-hub.zip");
+    await writeFile(archive, Buffer.from(await response.arrayBuffer()));
+    const entries = listArchive(archive).trim().split(/\r?\n/).filter(Boolean);
+    if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В обновлении Hobbyka Hub найден небезопасный путь.");
+    extractArchive(archive, temp);
+    const source = join(temp, entries[0].split(/[\\/]/)[0], "plugins", "hobbyka-hub");
+    await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8");
+    await rm(pluginRoot, { recursive: true, force: true });
+    await cp(source, pluginRoot, { recursive: true });
+    await writeMarketplace(dirname(dirname(pluginRoot)));
+    run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
+    await copyUpdater(pluginRoot);
+    if (!quiet) console.log(`Hobbyka Hub обновлён до ${latest.version}.`);
+    return true;
+  } finally { await rm(temp, { recursive: true, force: true }); }
 }
 
 async function propose(value, submit, destination) {
