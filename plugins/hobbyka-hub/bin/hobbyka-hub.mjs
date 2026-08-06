@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { createWriteStream } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { Readable, Transform } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 
 const script = fileURLToPath(import.meta.url);
@@ -29,17 +32,13 @@ async function install(slug, { update = false, quiet = false } = {}) {
   const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}`, undefined, quiet);
   if (!response) return;
   if (!response.ok) fail(await response.text());
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const expected = response.headers.get("x-hobbyka-sha256");
-  const actual = createHash("sha256").update(bytes).digest("hex");
-  if (!expected || actual !== expected) fail("Контрольная сумма архива не совпала.");
 
   const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
   const pluginRoot = join(codexRoot, "plugins", slug);
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-"));
   try {
     const archive = join(temp, `${slug}.zip`);
-    await writeFile(archive, bytes);
+    await saveVerified(response, archive);
     const entries = listArchive(archive).trim().split(/\r?\n/).filter(Boolean);
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В архиве найден небезопасный путь.");
     await rm(pluginRoot, { recursive: true, force: true });
@@ -125,15 +124,12 @@ async function propose(value, submit, destination) {
   try { await access(target); fail(`Папка уже существует: ${target}`); } catch (error) { if (error?.code !== "ENOENT") throw error; }
   const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=propose`);
   if (!response.ok) fail(await response.text());
-  const bytes = Buffer.from(await response.arrayBuffer());
-  const expected = response.headers.get("x-hobbyka-sha256");
-  if (!expected || createHash("sha256").update(bytes).digest("hex") !== expected) fail("Контрольная сумма архива не совпала.");
   const baseCommit = response.headers.get("x-hobbyka-github-commit");
   if (!baseCommit) fail("Hub не вернул версию исходников.");
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-propose-"));
   try {
     const archive = join(temp, `${slug}.zip`);
-    await writeFile(archive, bytes);
+    await saveVerified(response, archive);
     const entries = listArchive(archive).trim().split(/\r?\n/).filter(Boolean);
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В архиве найден небезопасный путь.");
     await mkdir(target, { recursive: false });
@@ -231,6 +227,14 @@ async function writeMarketplace(codexRoot) {
 }
 
 async function directories(root) { try { return (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name); } catch { return []; } }
+async function saveVerified(response, destination) {
+  const expected = response.headers.get("x-hobbyka-sha256");
+  if (!expected || !response.body) fail("Hub не вернул контрольную сумму архива.");
+  const hash = createHash("sha256");
+  const verify = new Transform({ transform(chunk, encoding, callback) { hash.update(chunk); callback(null, chunk); } });
+  await pipeline(Readable.fromWeb(response.body), verify, createWriteStream(destination));
+  if (hash.digest("hex") !== expected) fail("Контрольная сумма архива не совпала.");
+}
 async function runPostUpdateHook(pluginRoot, ...args) {
   const hook = join(pluginRoot, ".codex-plugin", "post-update.mjs");
   try { await access(hook); } catch (error) { if (error?.code === "ENOENT") return false; throw error; }
@@ -259,6 +263,10 @@ async function selfTest() {
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
   const fixture = await mkdtemp(join(tmpdir(), "hobbyka-hook-test-"));
   try {
+    const payload = Buffer.from("streamed archive");
+    const archive = join(fixture, "archive.zip");
+    await saveVerified(new Response(payload, { headers: { "x-hobbyka-sha256": createHash("sha256").update(payload).digest("hex") } }), archive);
+    if (await readFile(archive, "utf8") !== payload.toString()) throw new Error("streamed download failed");
     await mkdir(join(fixture, ".codex-plugin"));
     await writeFile(join(fixture, ".codex-plugin", "post-update.mjs"), "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], 'ok');\n");
     const marker = join(fixture, "ran");
