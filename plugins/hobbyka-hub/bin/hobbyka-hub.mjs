@@ -110,7 +110,7 @@ async function updatePublicHub(quiet) {
     await cp(source, pluginRoot, { recursive: true });
     await writeMarketplace(dirname(dirname(pluginRoot)));
     run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
-    await copyUpdater(pluginRoot);
+    await enableAutoupdate(true, pluginRoot);
     if (!quiet) console.log(`Hobbyka Hub обновлён до ${latest.version}.`);
     return true;
   } finally { await rm(temp, { recursive: true, force: true }); }
@@ -180,8 +180,8 @@ async function publish(directory) {
   } finally { await rm(temp, { recursive: true, force: true }); }
 }
 
-async function enableAutoupdate(quiet = false) {
-  const stableScript = await copyUpdater(dirname(dirname(script)));
+async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(script))) {
+  const stableScript = await copyUpdater(sourceRoot);
   if (platform() === "darwin") {
     const plist = join(homedir(), "Library", "LaunchAgents", "ru.hobbyka.hub-updater.plist");
     await mkdir(dirname(plist), { recursive: true });
