@@ -91,10 +91,12 @@ async function update(quiet = false) {
 
 async function updatePublicHub(quiet) {
   const pluginRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", "hobbyka-hub");
+  let currentRoot = pluginRoot;
+  try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
   let latest;
   try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
-  const current = JSON.parse(await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8"));
+  const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
   const response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" });
   if (!response.ok) { if (!quiet) fail("Не удалось скачать обновление Hobbyka Hub."); return false; }
@@ -227,8 +229,10 @@ async function copyUpdater(pluginRoot) {
   const root = join(homedir(), ".codex", "hobbyka-hub-updater");
   await mkdir(join(root, "bin"), { recursive: true });
   await mkdir(join(root, "assets"), { recursive: true });
+  await mkdir(join(root, ".codex-plugin"), { recursive: true });
   await copyFile(join(pluginRoot, "bin", "hobbyka-hub.mjs"), join(root, "bin", "hobbyka-hub.mjs"));
   await copyFile(join(pluginRoot, "assets", "hobbyka-chat-root.crt"), join(root, "assets", "hobbyka-chat-root.crt"));
+  await copyFile(join(pluginRoot, ".codex-plugin", "plugin.json"), join(root, ".codex-plugin", "plugin.json"));
   await chmod(join(root, "bin", "hobbyka-hub.mjs"), 0o755);
   return join(root, "bin", "hobbyka-hub.mjs");
 }
@@ -277,6 +281,7 @@ async function hubFetch(url, options, quiet = false) { let response; try { respo
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
+  if (!copyUpdater.toString().includes('".codex-plugin"') || !updatePublicHub.toString().includes("dirname(dirname(script))")) throw new Error("fresh public bootstrap update failed");
   if (!macPlist("/path/node", "/path/updater", "/path/codex").includes("<integer>900</integer>") || !macPlist("/path/node", "/path/updater", "/path/codex").includes("HOBBYKA_CODEX_COMMAND</key><string>/path/codex")) throw new Error("macOS schedule failed");
   if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("HOBBYKA_CODEX_COMMAND") || !windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("update --quiet")) throw new Error("Windows schedule failed");
   const units = linuxUnits("/path/node", "/path/updater", "/path/codex");
