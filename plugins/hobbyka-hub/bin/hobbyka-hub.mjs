@@ -45,9 +45,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     await mkdir(pluginRoot, { recursive: true });
     extractArchive(archive, pluginRoot);
     await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8");
-    await writeMarketplace(codexRoot);
-    const configured = JSON.parse(capture(codexCommand(), ["plugin", "marketplace", "list", "--json"]));
-    if (!configured.marketplaces?.some((marketplace) => marketplace.name === "hobbyka-hub")) run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
+    await configureMarketplace(codexRoot);
     run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
     await runPostUpdateHook(pluginRoot);
@@ -246,6 +244,27 @@ async function writeMarketplace(codexRoot) {
   await writeFile(join(codexRoot, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "hobbyka-hub", plugins: names.sort().map((name) => ({ name, source: { source: "local", path: `./plugins/${name}` }, policy: { installation: "AVAILABLE" } })) }, null, 2));
 }
 
+async function configureMarketplace(codexRoot) {
+  const hubRoot = join(codexRoot, "plugins", "hobbyka-hub");
+  try { await access(join(hubRoot, ".codex-plugin", "plugin.json")); } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    await mkdir(dirname(hubRoot), { recursive: true });
+    await cp(dirname(dirname(script)), hubRoot, { recursive: true });
+  }
+  await writeMarketplace(codexRoot);
+  const marketplaces = JSON.parse(capture(codexCommand(), ["plugin", "marketplace", "list", "--json"])).marketplaces ?? [];
+  const existing = marketplaces.find((marketplace) => marketplace.name === "hobbyka-hub");
+  if (managedMarketplace(existing, codexRoot)) return;
+  if (existing) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka-hub"]);
+  run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
+  run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
+}
+
+function managedMarketplace(marketplace, codexRoot) {
+  const root = marketplace?.root ?? marketplace?.marketplaceSource?.source;
+  return marketplace?.name === "hobbyka-hub" && typeof root === "string" && resolve(root) === resolve(codexRoot);
+}
+
 async function directories(root) { try { return (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name); } catch { return []; } }
 async function saveVerified(response, destination) {
   const expected = response.headers.get("x-hobbyka-sha256");
@@ -281,6 +300,7 @@ async function hubFetch(url, options, quiet = false) { let response; try { respo
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
+  if (managedMarketplace({ name: "hobbyka-hub", root: "/managed" }, "/managed") !== true || managedMarketplace({ name: "hobbyka-hub", root: "/public" }, "/managed") !== false) throw new Error("marketplace collision check failed");
   if (!copyUpdater.toString().includes('".codex-plugin"') || !updatePublicHub.toString().includes("dirname(dirname(script))")) throw new Error("fresh public bootstrap update failed");
   if (!macPlist("/path/node", "/path/updater", "/path/codex").includes("<integer>900</integer>") || !macPlist("/path/node", "/path/updater", "/path/codex").includes("HOBBYKA_CODEX_COMMAND</key><string>/path/codex")) throw new Error("macOS schedule failed");
   if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("HOBBYKA_CODEX_COMMAND") || !windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("update --quiet")) throw new Error("Windows schedule failed");
