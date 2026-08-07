@@ -195,7 +195,15 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
     const launcher = join(dirname(stableScript), "update-hidden.vbs");
     await writeFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
     run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", `wscript.exe "${launcher}"`]);
-  } else fail("Автообновление поддерживается на macOS и Windows.");
+  } else if (platform() === "linux") {
+    const systemd = linuxSystemd();
+    const units = linuxUnits(process.execPath, stableScript, codex);
+    await mkdir(systemd.directory, { recursive: true });
+    await writeFile(join(systemd.directory, "hobbyka-hub-updater.service"), units.service);
+    await writeFile(join(systemd.directory, "hobbyka-hub-updater.timer"), units.timer);
+    run("systemctl", [...systemd.args, "daemon-reload"]);
+    run("systemctl", [...systemd.args, "enable", "--now", "hobbyka-hub-updater.timer"]);
+  } else fail("Автообновление поддерживается на macOS, Windows и Linux.");
   if (!quiet) console.log("Автообновление фирменных плагинов включено.");
 }
 
@@ -205,7 +213,13 @@ async function disableAutoupdate() {
     run("launchctl", ["bootout", `gui/${process.getuid()}`, plist], undefined, true);
     await rm(plist, { force: true });
   } else if (platform() === "win32") run("schtasks.exe", ["/Delete", "/F", "/TN", "Hobbyka Hub Auto Update"], undefined, true);
-  else fail("Автообновление поддерживается на macOS и Windows.");
+  else if (platform() === "linux") {
+    const systemd = linuxSystemd();
+    run("systemctl", [...systemd.args, "disable", "--now", "hobbyka-hub-updater.timer"], undefined, true);
+    await rm(join(systemd.directory, "hobbyka-hub-updater.service"), { force: true });
+    await rm(join(systemd.directory, "hobbyka-hub-updater.timer"), { force: true });
+    run("systemctl", [...systemd.args, "daemon-reload"]);
+  } else fail("Автообновление поддерживается на macOS, Windows и Linux.");
   console.log("Автообновление выключено.");
 }
 
@@ -254,6 +268,9 @@ function resolveCodexCommand() { const command = codexCommand(); if (command.inc
 function xml(value) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
 function macPlist(node, updater, codex) { return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>ru.hobbyka.hub-updater</string><key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(updater)}</string><string>update</string><string>--quiet</string></array><key>EnvironmentVariables</key><dict><key>HOBBYKA_CODEX_COMMAND</key><string>${xml(codex)}</string></dict><key>StartInterval</key><integer>900</integer><key>RunAtLoad</key><true/></dict></plist>\n`; }
 function windowsLauncher(node, updater, codex) { const escape = (value) => value.replaceAll('"', '""'); const command = escape(`"${node}" "${updater}" update --quiet`); return `Set shell = CreateObject("Wscript.Shell")\r\nshell.Environment("Process")("HOBBYKA_CODEX_COMMAND") = "${escape(codex)}"\r\nshell.Run "${command}", 0, False\r\n`; }
+function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
+function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
+function linuxUnits(node, updater, codex) { return { service: `[Unit]\nDescription=Update Hobbyka Hub plugins\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nEnvironment=${systemdQuote(`HOBBYKA_CODEX_COMMAND=${codex}`)}\nExecStart=${systemdQuote(node)} ${systemdQuote(updater)} update --quiet\n`, timer: `[Unit]\nDescription=Check Hobbyka Hub plugin updates every 15 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n` }; }
 function run(executable, args, cwd, allowFailure = false) { const result = spawnSync(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); }
 function capture(executable, args) { const result = spawnSync(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
@@ -262,6 +279,8 @@ async function selfTest() {
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
   if (!macPlist("/path/node", "/path/updater", "/path/codex").includes("<integer>900</integer>") || !macPlist("/path/node", "/path/updater", "/path/codex").includes("HOBBYKA_CODEX_COMMAND</key><string>/path/codex")) throw new Error("macOS schedule failed");
   if (!windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("HOBBYKA_CODEX_COMMAND") || !windowsLauncher("C:\\Node\\node.exe", "C:\\Hub\\update.mjs", "C:\\Codex\\codex.exe").includes("update --quiet")) throw new Error("Windows schedule failed");
+  const units = linuxUnits("/path/node", "/path/updater", "/path/codex");
+  if (!units.service.includes('Environment="HOBBYKA_CODEX_COMMAND=/path/codex"') || !units.service.includes('ExecStart="/path/node" "/path/updater" update --quiet') || !units.timer.includes("OnUnitActiveSec=15min")) throw new Error("Linux schedule failed");
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
