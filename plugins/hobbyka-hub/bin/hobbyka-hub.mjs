@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { access, chmod, copyFile, cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { access, chmod, copyFile, cp, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -45,6 +45,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     await mkdir(pluginRoot, { recursive: true });
     extractArchive(archive, pluginRoot);
     await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8");
+    await restoreExecutableScripts(pluginRoot);
     await configureMarketplace(codexRoot);
     run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
@@ -266,6 +267,27 @@ function managedMarketplace(marketplace, codexRoot) {
 }
 
 async function directories(root) { try { return (await readdir(root, { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name); } catch { return []; } }
+async function restoreExecutableScripts(pluginRoot) {
+  if (platform() === "win32") return;
+  for (const directory of ["scripts", "bin"]) await restoreShebangFiles(join(pluginRoot, directory));
+}
+async function restoreShebangFiles(root) {
+  let entries;
+  try { entries = await readdir(root, { withFileTypes: true }); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
+  for (const entry of entries) {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) await restoreShebangFiles(path);
+    else if (entry.isFile() && await hasShebang(path)) await chmod(path, 0o755);
+  }
+}
+async function hasShebang(path) {
+  const handle = await open(path, "r");
+  try {
+    const marker = Buffer.alloc(2);
+    const { bytesRead } = await handle.read(marker, 0, marker.length, 0);
+    return bytesRead === marker.length && marker.equals(Buffer.from("#!"));
+  } finally { await handle.close(); }
+}
 async function saveVerified(response, destination) {
   const expected = response.headers.get("x-hobbyka-sha256");
   if (!expected || !response.body) fail("Hub не вернул контрольную сумму архива.");
@@ -318,6 +340,13 @@ async function selfTest() {
     if (await readFile(archive, "utf8") !== payload.toString()) throw new Error("streamed download failed");
     await mkdir(join(fixture, ".codex-plugin"));
     await writeFile(join(fixture, ".codex-plugin", "post-update.mjs"), "import { writeFileSync } from 'node:fs'; writeFileSync(process.argv[2], 'ok');\n");
+    await mkdir(join(fixture, "scripts"));
+    const launcher = join(fixture, "scripts", "launcher");
+    const config = join(fixture, "scripts", "config.json");
+    await writeFile(launcher, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
+    await writeFile(config, "{}\n", { mode: 0o644 });
+    await restoreExecutableScripts(fixture);
+    if (((await stat(launcher)).mode & 0o111) === 0 || ((await stat(config)).mode & 0o111) !== 0) throw new Error("executable script restoration failed");
     const marker = join(fixture, "ran");
     await runPostUpdateHook(fixture, marker);
     if (await readFile(marker, "utf8") !== "ok") throw new Error("post-update hook failed");
