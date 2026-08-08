@@ -164,6 +164,9 @@ async function publish(directory) {
   const root = resolve(directory ?? "");
   const manifest = JSON.parse(await readFile(join(root, ".codex-plugin", "plugin.json"), "utf8"));
   if (!manifest.name || !manifest.version || !manifest.description) fail("В plugin.json нужны name, version и description.");
+  const tags = Array.isArray(manifest.keywords)
+    ? [...new Set(manifest.keywords.filter((tag) => typeof tag === "string").map((tag) => tag.trim()).filter(Boolean))]
+    : [];
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-publish-"));
   try {
     const archive = join(temp, `${manifest.name}.zip`);
@@ -174,7 +177,7 @@ async function publish(directory) {
     form.set("version", manifest.version);
     form.set("summary", manifest.interface?.shortDescription ?? manifest.description);
     form.set("description", manifest.interface?.longDescription ?? manifest.description);
-    form.set("tags", manifest.interface?.category ?? "Productivity");
+    form.set("tags", JSON.stringify(tags));
     form.set("archive", new File([await readFile(archive)], basename(archive), { type: "application/zip" }));
     const response = await hubFetch(`${base}/api/plugins`, { method: "POST", body: form });
     if (!response.ok) fail(await response.text());
