@@ -55,13 +55,14 @@ async function reportBug(args) {
   }
   if (!parsed.operation) return jsonFailure("failed", "operation_required", "После preview повторите команду с показанным --operation UUID и --confirm.", 2, refs);
 
+  const signal = AbortSignal.timeout(10 * 60_000);
   const attachmentIDs = [];
   for (let index = 0; index < files.length; index++) {
     const file = files[index];
     const form = new FormData();
     form.set("file", new File([await readFile(file.path)], file.name));
     let response;
-    try { response = await fetch(`${agentChat}/agent/v1/attachments`, { method: "POST", headers: { "X-Hobbyka-Operation-ID": uploadOperations[index] }, body: form }); }
+    try { response = await fetch(`${agentChat}/agent/v1/attachments`, { method: "POST", headers: { "X-Hobbyka-Operation-ID": uploadOperations[index] }, body: form, signal }); }
     catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
     if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
     const attachment = await response.json();
@@ -69,7 +70,7 @@ async function reportBug(args) {
     attachmentIDs.push(attachment.id);
   }
   let response;
-  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body, attachment_ids: attachmentIDs, operation_id: operation }) }); }
+  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body, attachment_ids: attachmentIDs, operation_id: operation }), signal }); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
   const report = await response.json();
