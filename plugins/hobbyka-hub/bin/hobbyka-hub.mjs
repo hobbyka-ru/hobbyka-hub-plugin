@@ -54,7 +54,7 @@ async function submitReport(args, kind) {
   const uploadOperations = files.map((_, index) => derivedOperationID(operation, index));
   const refs = [{ type: "operation", id: operation, ref: `operation:${operation}` }, ...uploadOperations.map((id) => ({ type: "operation", id, ref: `operation:${id}` }))];
   const details = { body_sha256: createHash("sha256").update(body).digest("hex"), body_bytes: Buffer.byteLength(body), files: files.map((file, index) => ({ name: file.name, size_bytes: file.size_bytes, operation_id: uploadOperations[index] })), operation_id: operation };
-  const action = kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug";
+  const action = reportAction(kind);
   if (!parsed.confirm) {
     return printJSON({ status: "ok", refs, provenance: localProvenance(), effects: { state: "planned", action, server: agentChat, required_flags: ["--confirm", `--operation ${operation}`], ...details } }, 0);
   }
@@ -83,8 +83,8 @@ async function submitReport(args, kind) {
   let report;
   try { report = await response.json(); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
-  if (!validUUID(report.id) || report.kind !== kind) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул запись ожидаемого типа.", 6, refs);
-  return printJSON({ status: "ok", result: report, refs: [{ type: kind, id: report.id, ref: `${kind}:${report.id}` }, ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action, ...details } }, 0);
+  if (!validReport(report, kind)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул запись ожидаемого типа.", 6, refs);
+  return printJSON({ status: "ok", result: report, refs: [reportRef(kind, report.id), ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action, ...details } }, 0);
 }
 
 function parseReportArgs(args) {
@@ -114,6 +114,9 @@ function derivedOperationID(operation, index) {
 }
 
 function validUUID(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? ""); }
+function reportAction(kind) { return kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug"; }
+function reportRef(kind, id) { return { type: kind, id, ref: `${kind}:${id}` }; }
+function validReport(report, kind) { return report !== null && typeof report === "object" && validUUID(report.id) && report.kind === kind; }
 function localProvenance() { return { source: "local", freshness: new Date().toISOString() }; }
 function jsonFailure(status, code, message, exitCode, refs = []) { return printJSON({ status, result: { code, message: String(message).trim() }, refs }, exitCode); }
 function printJSON(value, exitCode) { console.log(JSON.stringify(value)); process.exitCode = exitCode; return value; }
@@ -415,7 +418,8 @@ async function selfTest() {
 	const reportOperation = "5d90568b-58d5-481d-8ef1-2d91cd904708";
 	const reportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation, "--confirm"]);
 	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !validUUID(derivedOperationID(reportOperation, 0))) throw new Error("bug report arguments failed");
-	if (!submitReport.toString().includes('JSON.stringify({ kind, body')) throw new Error("typed report submission failed");
+	if (reportAction("bug") !== "report Hobbyka bug" || reportAction("idea") !== "submit Hobbyka idea") throw new Error("typed report preview failed");
+	if (reportRef("idea", reportOperation).ref !== `idea:${reportOperation}` || !validReport({ id: reportOperation, kind: "idea" }, "idea") || !validReport({ id: reportOperation, kind: "bug" }, "bug") || validReport({ id: reportOperation, kind: "bug" }, "idea") || validReport(null, "idea")) throw new Error("typed report response failed");
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
   if (managedMarketplace({ name: "hobbyka-hub", root: "/managed" }, "/managed") !== true || managedMarketplace({ name: "hobbyka-hub", root: "/public" }, "/managed") !== false) throw new Error("marketplace collision check failed");
   if (!copyUpdater.toString().includes('".codex-plugin"') || !updatePublicHub.toString().includes("dirname(dirname(script))")) throw new Error("fresh public bootstrap update failed");
