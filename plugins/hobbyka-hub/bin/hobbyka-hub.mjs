@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, platform, tmpdir } from "node:os";
@@ -17,15 +17,96 @@ if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
 
 const [command, ...args] = process.argv.slice(2);
 const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\/$/, "");
+const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\/$/, "");
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
-if (command === "install") await install(args[0]);
+if (command === "report-bug") await reportBug(args);
+else if (command === "install") await install(args[0]);
 else if (command === "publish") await publish(args[0]);
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
 else if (command === "update") await update(args.includes("--quiet"));
 else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();
 else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub report-bug --stdin [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
+
+async function reportBug(args) {
+  const parsed = parseReportArgs(args);
+  if (!parsed.ok) return jsonFailure("failed", "invalid_arguments", parsed.error, 2);
+  let body = "";
+  try {
+    process.stdin.setEncoding("utf8");
+    for await (const chunk of process.stdin) body += chunk;
+    body = body.trim();
+  } catch (error) { return jsonFailure("failed", "invalid_stdin", error.message, 2); }
+  if (!body || Buffer.byteLength(body) > 32768) return jsonFailure("failed", "invalid_report", "Нужен текст до 32 КБ.", 2);
+  const files = [];
+  for (const path of parsed.files) {
+    let metadata;
+    try { metadata = await stat(path); } catch (error) { return jsonFailure("failed", "invalid_file", `${path}: ${error.message}`, 2); }
+    if (!metadata.isFile() || metadata.size < 1 || metadata.size > 100 * 1024 * 1024) return jsonFailure("failed", "invalid_file", `${path}: нужен файл до 100 МБ.`, 2);
+    files.push({ path: resolve(path), name: basename(path), size_bytes: metadata.size });
+  }
+  const operation = parsed.operation || randomUUID();
+  const uploadOperations = files.map((_, index) => derivedOperationID(operation, index));
+  const refs = [{ type: "operation", id: operation, ref: `operation:${operation}` }, ...uploadOperations.map((id) => ({ type: "operation", id, ref: `operation:${id}` }))];
+  const details = { body_sha256: createHash("sha256").update(body).digest("hex"), body_bytes: Buffer.byteLength(body), files: files.map((file, index) => ({ name: file.name, size_bytes: file.size_bytes, operation_id: uploadOperations[index] })), operation_id: operation };
+  if (!parsed.confirm) {
+    return printJSON({ status: "ok", refs, provenance: localProvenance(), effects: { state: "planned", action: "report Hobbyka bug", server: agentChat, required_flags: ["--confirm", `--operation ${operation}`], ...details } }, 0);
+  }
+  if (!parsed.operation) return jsonFailure("failed", "operation_required", "После preview повторите команду с показанным --operation UUID и --confirm.", 2, refs);
+
+  const attachmentIDs = [];
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
+    const form = new FormData();
+    form.set("file", new File([await readFile(file.path)], file.name));
+    let response;
+    try { response = await fetch(`${agentChat}/agent/v1/attachments`, { method: "POST", headers: { "X-Hobbyka-Operation-ID": uploadOperations[index] }, body: form }); }
+    catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
+    if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
+    const attachment = await response.json();
+    if (!validUUID(attachment.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
+    attachmentIDs.push(attachment.id);
+  }
+  let response;
+  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body, attachment_ids: attachmentIDs, operation_id: operation }) }); }
+  catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
+  if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
+  const report = await response.json();
+  if (!validUUID(report.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID бага.", 6, refs);
+  return printJSON({ status: "ok", result: report, refs: [{ type: "bug", id: report.id, ref: `bug:${report.id}` }, ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action: "report Hobbyka bug", ...details } }, 0);
+}
+
+function parseReportArgs(args) {
+  const result = { ok: true, files: [], operation: "", confirm: false, stdin: false };
+  for (let index = 0; index < args.length; index++) {
+    const value = args[index];
+    if (value === "--stdin") result.stdin = true;
+    else if (value === "--confirm") result.confirm = true;
+    else if (value === "--file" && args[index + 1]) result.files.push(args[++index]);
+    else if (value.startsWith("--file=")) result.files.push(value.slice(7));
+    else if (value === "--operation" && args[index + 1]) result.operation = args[++index];
+    else if (value.startsWith("--operation=")) result.operation = value.slice(12);
+    else return { ok: false, error: `Неизвестный аргумент: ${value}` };
+  }
+  if (!result.stdin) return { ok: false, error: "Нужен --stdin." };
+  if (result.files.length > 5) return { ok: false, error: "Можно приложить не больше 5 файлов." };
+  if (result.operation && !validUUID(result.operation)) return { ok: false, error: "--operation должен быть UUID." };
+  return result;
+}
+
+function derivedOperationID(operation, index) {
+  const value = createHash("sha256").update(`${operation}:attachment:${index}`).digest().subarray(0, 16);
+  value[6] = (value[6] & 0x0f) | 0x50;
+  value[8] = (value[8] & 0x3f) | 0x80;
+  const hex = value.toString("hex");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+}
+
+function validUUID(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? ""); }
+function localProvenance() { return { source: "local", freshness: new Date().toISOString() }; }
+function jsonFailure(status, code, message, exitCode, refs = []) { return printJSON({ status, result: { code, message: String(message).trim() }, refs }, exitCode); }
+function printJSON(value, exitCode) { console.log(JSON.stringify(value)); process.exitCode = exitCode; return value; }
 
 async function install(slug, { update = false, quiet = false } = {}) {
   if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");
@@ -321,6 +402,9 @@ function capture(executable, args) { const result = spawnSync(executable, args, 
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
+	const reportOperation = "5d90568b-58d5-481d-8ef1-2d91cd904708";
+	const reportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation, "--confirm"]);
+	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !validUUID(derivedOperationID(reportOperation, 0))) throw new Error("bug report arguments failed");
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
   if (managedMarketplace({ name: "hobbyka-hub", root: "/managed" }, "/managed") !== true || managedMarketplace({ name: "hobbyka-hub", root: "/public" }, "/managed") !== false) throw new Error("marketplace collision check failed");
   if (!copyUpdater.toString().includes('".codex-plugin"') || !updatePublicHub.toString().includes("dirname(dirname(script))")) throw new Error("fresh public bootstrap update failed");
