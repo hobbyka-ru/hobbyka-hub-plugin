@@ -1,0 +1,4 @@
+interface:
+  display_name: "Предложения Хоббики"
+  short_description: "Помогает точно описывать идеи улучшений."
+  default_prompt: "Используй $hobbyka-idea-report, чтобы оформить и отправить предложение улучшения Хоббики."
