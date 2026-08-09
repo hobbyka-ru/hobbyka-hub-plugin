@@ -35,7 +35,10 @@ async function reportBug(args) {
   let body = "";
   try {
     process.stdin.setEncoding("utf8");
-    for await (const chunk of process.stdin) body += chunk;
+    for await (const chunk of process.stdin) {
+      body += chunk;
+      if (Buffer.byteLength(body) > 32768) break;
+    }
     body = body.trim();
   } catch (error) { return jsonFailure("failed", "invalid_stdin", error.message, 2); }
   if (!body || Buffer.byteLength(body) > 32768) return jsonFailure("failed", "invalid_report", "Нужен текст до 32 КБ.", 2);
@@ -65,7 +68,9 @@ async function reportBug(args) {
     try { response = await fetch(`${agentChat}/agent/v1/attachments`, { method: "POST", headers: { "X-Hobbyka-Operation-ID": uploadOperations[index] }, body: form, signal }); }
     catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
     if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
-    const attachment = await response.json();
+    let attachment;
+    try { attachment = await response.json(); }
+    catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
     if (!validUUID(attachment.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
     attachmentIDs.push(attachment.id);
   }
@@ -73,7 +78,9 @@ async function reportBug(args) {
   try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ body, attachment_ids: attachmentIDs, operation_id: operation }), signal }); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
-  const report = await response.json();
+  let report;
+  try { report = await response.json(); }
+  catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!validUUID(report.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID бага.", 6, refs);
   return printJSON({ status: "ok", result: report, refs: [{ type: "bug", id: report.id, ref: `bug:${report.id}` }, ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action: "report Hobbyka bug", ...details } }, 0);
 }
