@@ -1,21 +1,24 @@
 {
   "name": "hobbyka-hub",
-  "version": "0.4.17",
-  "description": "Установка, обновление, публикация и предложения изменений для плагинов Hobbyka Hub.",
+  "version": "0.4.18",
+  "description": "Установка и публикация плагинов Hobbyka Hub, предложения изменений и write-only отчёты о багах.",
   "author": { "name": "Hobbyka" },
   "skills": "./skills/",
   "interface": {
     "displayName": "Hobbyka Hub",
-    "shortDescription": "Установить, обновить или предложить изменение плагина.",
-    "longDescription": "Устанавливает и обновляет внутренние плагины Хоббики, публикует готовые плагины и отправляет предложения изменений.",
+    "shortDescription": "Плагины, предложения изменений и отчёты о багах.",
+    "longDescription": "Устанавливает и обновляет внутренние плагины Хоббики, публикует готовые плагины, отправляет предложения изменений и позволяет только создавать отчёты о багах.",
     "developerName": "Hobbyka",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
+    "websiteURL": "https://10.8.1.0:8443/plugins/hobbyka-agent-chat",
+    "privacyPolicyURL": "https://github.com/hobbyka-ru/plugins/blob/main/hobbyka/hobbyka-agent-chat/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/hobbyka-ru/plugins/blob/main/hobbyka/hobbyka-agent-chat/TERMS.md",
     "brandColor": "#FBC40A",
     "defaultPrompt": [
       "Установи плагин <slug> из Hobbyka Hub.",
       "Опубликуй папку моего готового плагина в Hobbyka Hub.",
-      "Подготовь локальную копию плагина <slug> и предложи изменения через PR."
+      "Отправь замеченный баг Хоббики с фактами и доказательствами."
     ]
   }
 }
