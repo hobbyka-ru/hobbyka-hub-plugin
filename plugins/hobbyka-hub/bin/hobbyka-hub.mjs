@@ -28,20 +28,26 @@ else if (command === "update") await update(args.includes("--quiet"));
 else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();
 else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub report-bug --stdin [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea --stdin [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
 
 async function submitReport(args, kind) {
   const parsed = parseReportArgs(args);
   if (!parsed.ok) return jsonFailure("failed", "invalid_arguments", parsed.error, 2);
   let body = "";
   try {
-    process.stdin.setEncoding("utf8");
-    for await (const chunk of process.stdin) {
-      body += chunk;
-      if (Buffer.byteLength(body) > 32768) break;
+    if (parsed.bodyFile) {
+      const metadata = await stat(parsed.bodyFile);
+      if (!metadata.isFile() || metadata.size > 32768) return jsonFailure("failed", "invalid_report", "Нужен UTF-8-файл до 32 КБ.", 2);
+      body = await readFile(parsed.bodyFile, "utf8");
+    } else {
+      process.stdin.setEncoding("utf8");
+      for await (const chunk of process.stdin) {
+        body += chunk;
+        if (Buffer.byteLength(body) > 32768) break;
+      }
     }
     body = body.trim();
-  } catch (error) { return jsonFailure("failed", "invalid_stdin", error.message, 2); }
+  } catch (error) { return jsonFailure("failed", "invalid_body", error.message, 2); }
   if (!body || Buffer.byteLength(body) > 32768) return jsonFailure("failed", "invalid_report", "Нужен текст до 32 КБ.", 2);
   const files = [];
   for (const path of parsed.files) {
@@ -88,10 +94,12 @@ async function submitReport(args, kind) {
 }
 
 function parseReportArgs(args) {
-  const result = { ok: true, files: [], operation: "", confirm: false, stdin: false };
+  const result = { ok: true, files: [], operation: "", confirm: false, stdin: false, bodyFile: "" };
   for (let index = 0; index < args.length; index++) {
     const value = args[index];
     if (value === "--stdin") result.stdin = true;
+    else if (value === "--body-file" && args[index + 1]) result.bodyFile = args[++index];
+    else if (value.startsWith("--body-file=")) result.bodyFile = value.slice(12);
     else if (value === "--confirm") result.confirm = true;
     else if (value === "--file" && args[index + 1]) result.files.push(args[++index]);
     else if (value.startsWith("--file=")) result.files.push(value.slice(7));
@@ -99,7 +107,7 @@ function parseReportArgs(args) {
     else if (value.startsWith("--operation=")) result.operation = value.slice(12);
     else return { ok: false, error: `Неизвестный аргумент: ${value}` };
   }
-  if (!result.stdin) return { ok: false, error: "Нужен --stdin." };
+  if (result.stdin === Boolean(result.bodyFile)) return { ok: false, error: "Нужен ровно один источник текста: --stdin или --body-file PATH." };
   if (result.files.length > 5) return { ok: false, error: "Можно приложить не больше 5 файлов." };
   if (result.operation && !validUUID(result.operation)) return { ok: false, error: "--operation должен быть UUID." };
   return result;

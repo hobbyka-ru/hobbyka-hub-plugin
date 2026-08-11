@@ -9,7 +9,7 @@ description: "Use when сотрудник просит сформулирова�
 
 ## Формат
 
-Передай один Markdown-текст через stdin:
+Передай один Markdown-текст через stdin. На Windows сохрани его во временный UTF-8-файл и передай через `--body-file PATH`: PowerShell может необратимо заменить кириллицу вопросительными знаками в конвейере.
 
 ```markdown
 ## Где
@@ -46,7 +46,7 @@ description: "Use when сотрудник просит сформулирова�
 
 ## Отправка
 
-1. Выполни `node <plugin-root>/bin/hobbyka-hub.mjs idea --stdin [--file PATH ...]` и прочитай preview.
+1. Выполни `node <plugin-root>/bin/hobbyka-hub.mjs idea --stdin [--file PATH ...]` и прочитай preview. На Windows используй `--body-file PATH` вместо `--stdin`.
 2. Повтори ту же команду с показанным `--operation UUID` и `--confirm`. Можно приложить до пяти файлов по 100 МБ.
 3. Успех подтверждай только при `status: ok` и возвращённом `idea:UUID`.
 4. При `outcome_unknown` сохрани `operation:UUID` и не повторяй запись с новым UUID.
