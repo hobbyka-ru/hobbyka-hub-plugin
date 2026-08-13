@@ -182,7 +182,7 @@ async function update(quiet = false) {
     if (marketplaces.some((marketplace) => marketplace.name === "hobbyka")) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka"]);
   }
   const installed = allInstalled
-    .filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub")
+    .filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub" && plugin.name !== "hobbyka-hub")
     .map((plugin) => ({ slug: plugin.name, version: plugin.version }));
   const pending = installed.filter((local) => remote.some((plugin) => plugin.slug === local.slug && plugin.version !== local.version)).sort((left, right) => left.slug === "hobbyka-hub" ? 1 : right.slug === "hobbyka-hub" ? -1 : left.slug.localeCompare(right.slug));
   for (const plugin of pending) await install(plugin.slug, { update: true, quiet });
@@ -404,7 +404,7 @@ async function runPostUpdateHook(pluginRoot, ...args) {
   run(process.execPath, [hook, ...args], pluginRoot);
   return true;
 }
-function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug)); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
+function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug).filter((slug) => slug !== "hobbyka-hub")); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
 function listArchive(archive) { return platform() !== "win32" ? capture("unzip", ["-Z1", archive]) : capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries | ForEach-Object {$_.FullName}} finally {$z.Dispose()}", archive]); }
 function extractArchive(archive, target) { if (platform() !== "win32") return run("unzip", ["-q", archive, "-d", target]); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force", archive, target]); }
 function createArchive(root, archive) { if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$items=Get-ChildItem -LiteralPath $args[0] -Force | Where-Object {$_.Name -notin @('.git','node_modules','.DS_Store','.hobbyka-proposal.json')}; Compress-Archive -Path $items.FullName -DestinationPath $args[1] -Force", root, archive]); }
@@ -438,6 +438,8 @@ async function selfTest() {
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
+  if (legacySlugs([{ name: "hobbyka-hub", installed: true, marketplaceName: "hobbyka" }], [{ slug: "hobbyka-hub" }]).length) throw new Error("public Hub ownership failed");
+  if (!update.toString().includes('plugin.name !== "hobbyka-hub"')) throw new Error("public Hub update ownership failed");
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
   const fixture = await mkdtemp(join(tmpdir(), "hobbyka-hook-test-"));
   try {
