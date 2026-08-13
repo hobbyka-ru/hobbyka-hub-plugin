@@ -1,71 +1,24 @@
 {
-  "title": "Windows PowerShell output makes safe plugin paths look unsafe",
+  "title": "Windows ZIP listing still fails through PowerShell stdout",
   "project": "Hobbyka Hub",
   "generated_at": "2026-08-13",
   "mode": "prove-fix",
-  "original_report": "On Windows, Hobbyka Hub 0.4.22 fails to install onec-direct-cli with: В архиве найден небезопасный путь.",
-  "discovery_scope": [
-    "plugins/hobbyka-hub/bin/hobbyka-hub.mjs Windows archive listing",
-    "live onec-direct-cli windows-amd64 archive",
-    "Hobbyka Hub tests"
-  ],
+  "original_report": "Valera confirmed that install onec-direct-cli still fails on Windows with an unsafe-path error in Hobbyka Hub 0.4.23.",
+  "discovery_scope": ["Windows archive listing in hobbyka-hub.mjs", "live onec-direct-cli Windows ZIP", "Hub regression tests"],
   "candidates": [],
-  "expected": "The safe onec-direct-cli archive installs on Windows.",
-  "actual": "Windows PowerShell output decoded as UTF-8 contains NUL bytes and is rejected by the archive path guard.",
-  "environment": "macOS arm64 reproducer simulating Windows PowerShell 5.1 UTF-16LE output; live windows-amd64 archive inspected",
-  "reproduction": "The focused test passes a safe ZIP entry through the same UTF-16LE-to-UTF-8 mismatch and verifies that the production guard rejects it.",
-  "failure_signal": "The regression test exits 1 because the Windows PowerShell command does not explicitly emit UTF-8.",
-  "root_cause": "listArchive asks powershell.exe for entry names while Node capture always decodes stdout as UTF-8; Windows PowerShell 5.1 can emit UTF-16LE.",
-  "fix_summary": "Set Console.OutputEncoding to UTF-8 before PowerShell writes archive entry names and bump Hobbyka Hub to 0.4.23.",
-  "why_causal": "It makes the producer encoding match the existing Node decoder before path validation.",
-  "reproduction_files": [
-    {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-encoding-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
-      "line": 1,
-      "summary": "Focused Windows encoding regression test."
-    }
-  ],
-  "fix_files": [
-    {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-encoding-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
-      "line": 407,
-      "summary": "PowerShell archive listing now emits UTF-8."
-    },
-    {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-encoding-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json",
-      "line": 3,
-      "summary": "Version 0.4.23."
-    }
-  ],
-  "checks": [
-    {
-      "name": "Focused regression",
-      "status": "passed",
-      "detail": "Exit 1 before the fix, exit 0 after it."
-    },
-    {
-      "name": "Hub self-test and full plugin tests",
-      "status": "passed",
-      "detail": "Self-test and both Node tests pass."
-    },
-    {
-      "name": "Live Windows archive integrity",
-      "status": "passed",
-      "detail": "onec-direct-cli windows-amd64 ZIP has safe paths and unzip reports no errors."
-    }
-  ],
-  "reproduce": [
-    "node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
-    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test",
-    "node --test plugins/hobbyka-hub/tests/*.test.mjs"
-  ],
-  "limitations": [
-    "The focused test simulates Windows PowerShell 5.1 output because no Windows host is attached to this workspace."
-  ],
-  "residual_risks": [
-    "A final install on Valera's Windows machine is still the strongest end-to-end confirmation."
-  ],
-  "notes": [
-    "The onec-direct-cli package itself was not changed."
-  ]
+  "expected": "A valid onec-direct-cli ZIP installs on Windows.",
+  "actual": "The safe ZIP is rejected while entry names pass through PowerShell stdout.",
+  "environment": "Windows report from Hobbyka Hub 0.4.23; local deterministic source-level regression on macOS arm64",
+  "reproduction": "The focused test requires the Windows path to bypass PowerShell stdout and read an explicitly UTF-8 listing file.",
+  "failure_signal": "The test exits 1 while listArchive still captures PowerShell stdout.",
+  "root_cause": "Setting Console.OutputEncoding was insufficient in the reporter's Windows PowerShell host; archive entry names still crossed an unreliable text-encoding boundary.",
+  "fix_summary": "PowerShell writes archive entry names directly to an explicit UTF-8 file, which Node reads with readFileSync; version bumped to 0.4.25.",
+  "why_causal": "The unsafe stdout encoding boundary is no longer used.",
+  "reproduction_files": [{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs","line":1,"summary":"Regression test requiring file-based UTF-8 transfer."}],
+  "fix_files": [{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs","line":1,"summary":"File-based Windows archive listing."},{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json","line":3,"summary":"Version 0.4.25."}],
+  "checks": [{"name":"Focused regression","status":"passed","detail":"Exit 1 before, exit 0 after."},{"name":"Hub suite","status":"passed","detail":"Self-test and all Node tests pass."}],
+  "reproduce": ["node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs", "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test", "node --test plugins/hobbyka-hub/tests/*.test.mjs"],
+  "limitations": ["Final end-to-end confirmation must be performed on Valera's Windows machine."],
+  "residual_risks": ["A different Windows-only extraction failure may surface after path validation succeeds."],
+  "notes": ["The onec-direct-cli package is unchanged and its live ZIP remains valid."]
 }

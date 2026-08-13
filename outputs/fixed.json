@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
   "label": "fixed",
-  "captured_at": "2026-08-13T13:41:46.882858+00:00",
+  "captured_at": "2026-08-13T14:45:19.376540+00:00",
   "command": [
     "node",
     "--test",
     "plugins/hobbyka-hub/tests/windows-archive-output.test.mjs"
   ],
-  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-encoding-20260813",
+  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813",
   "runtime": "Python 3.9.6 on Darwin arm64",
-  "duration_ms": 76.618,
+  "duration_ms": 63.577,
   "exit_code": 0,
   "timed_out": false,
-  "stdout": "\u2714 Windows archive listing is emitted as UTF-8 (0.822834ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 1\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 47.885875\n",
+  "stdout": "\u2714 Windows archive listing bypasses PowerShell stdout encoding (0.495417ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 1\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 36.5105\n",
   "stderr": "",
   "stdout_truncated": false,
   "stderr_truncated": false,
