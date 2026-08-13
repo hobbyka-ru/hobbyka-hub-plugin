@@ -1,51 +1,52 @@
 {
-  "title": "Windows Hub loses archive paths passed to PowerShell",
+  "title": "Windows Hub cannot start the Codex cmd shim",
   "project": "Hobbyka Hub",
   "generated_at": "2026-08-13",
   "mode": "prove-fix",
-  "original_report": "On Windows with Hobbyka Hub 0.4.26, install onec-direct-cli fails because PowerShell 5.1 receives empty positional arguments for ZIP listing and extraction.",
+  "original_report": "Hobbyka Hub 0.4.26 downloads hobbyka-agent-chat on Windows but fails before registration with spawnSync codex.cmd EINVAL; selecting a protected executable directly produces EPERM.",
   "discovery_scope": [
-    "plugins/hobbyka-hub/bin/hobbyka-hub.mjs archive listing, extraction, and creation",
-    "plugins/hobbyka-hub/tests/windows-archive-output.test.mjs"
+    "plugins/hobbyka-hub/bin/hobbyka-hub.mjs shared run and capture helpers",
+    "all Codex CLI call sites used by install, update, and marketplace registration",
+    "Node.js child_process documentation for Windows cmd files and DEP0190"
   ],
   "candidates": [],
-  "expected": "Hub validates the downloaded ZIP paths, extracts the plugin, and completes installation.",
-  "actual": "ZipFile.OpenRead receives an empty path and Node then fails to open the missing .entries file.",
-  "environment": "Reported on Windows, PowerShell 5.1, Node.js 24.19.0, Hobbyka Hub 0.4.26; focused regression and archive lifecycle verified on macOS.",
-  "reproduction": "A focused source regression test requires every Windows archive operation to use the system tar.exe path and rejects the broken PowerShell positional-argument pattern.",
-  "failure_signal": "The focused test exits 1 because Hub 0.4.26 still invokes powershell.exe with $args after -Command.",
-  "root_cause": "Windows PowerShell 5.1 does not bind the trailing process arguments to $args as the Hub command strings assumed. Listing, extraction, and ZIP creation shared the broken pattern.",
-  "fix_summary": "Use Windows' built-in tar.exe for ZIP listing, extraction, and creation while preserving path validation before extraction.",
-  "why_causal": "The fix removes the failed PowerShell argument boundary entirely; the same tar listing and extraction already completed the reported Windows user path on a temporary copy.",
+  "expected": "Hub invokes the installed Codex CLI, registers hobbyka-agent-chat@hobbyka-hub, and confirms installation.",
+  "actual": "Node.js 24 rejects direct execution of codex.cmd with EINVAL, so installation exits before registration and confirmation.",
+  "environment": "Reported on Windows with Hobbyka Hub 0.4.26 and Node.js 24; focused regression verified on macOS because no reachable Windows runner was available.",
+  "reproduction": "A focused test requires .cmd shims to be routed through cmd.exe without shell:true, verifies quoting, rejects cmd metacharacters, and keeps marketplace paths out of the command string.",
+  "failure_signal": "The focused test exits 1 because the shared process helper directly passes codex.cmd to spawnSync and has no safe Windows command path.",
+  "root_cause": "Windows .cmd files are shell scripts rather than directly executable programs. Hub passed codex.cmd to spawnSync without cmd.exe, which Node.js documents as unsupported on Windows.",
+  "fix_summary": "Route only Windows .cmd and .bat executables through cmd.exe /d /s /c with explicit quoting, metacharacter rejection, hidden execution, and verbatim arguments; keep all native executables on direct spawnSync.",
+  "why_causal": "The corrected shared helper handles every Codex CLI call and removes the direct .cmd execution that produced EINVAL without enabling Node's unsafe shell:true argument concatenation.",
   "reproduction_files": [
     {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs",
       "line": 7,
-      "summary": "Focused regression for all Windows archive operations."
+      "summary": "Focused Windows cmd invocation and injection regression test."
     }
   ],
   "fix_files": [
     {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
-      "line": 409,
-      "summary": "Replace PowerShell ZIP operations with tar.exe."
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
+      "line": 422,
+      "summary": "Safe .cmd/.bat execution in the shared process helper."
     },
     {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json",
-      "line": 4,
-      "summary": "Release version 0.4.27."
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json",
+      "line": 3,
+      "summary": "Release version 0.4.28."
     }
   ],
   "checks": [
     {
       "name": "Focused regression",
       "status": "passed",
-      "detail": "The same test changed from exit 1 to exit 0."
+      "detail": "The same command changed from exit 1 to exit 0."
     },
     {
       "name": "Hub test suite",
       "status": "passed",
-      "detail": "All three tests passed."
+      "detail": "All four tests passed."
     },
     {
       "name": "Hub self-test",
@@ -53,23 +54,29 @@
       "detail": "hobbyka-hub self-test: ok"
     },
     {
-      "name": "Archive lifecycle",
+      "name": "Syntax check",
       "status": "passed",
-      "detail": "Created, listed, and extracted a ZIP with the same tar argument structure."
+      "detail": "node --check completed successfully."
+    },
+    {
+      "name": "Plugin validation",
+      "status": "passed",
+      "detail": "Codex plugin validation passed."
     }
   ],
   "reproduce": [
-    "node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
+    "node --test plugins/hobbyka-hub/tests/windows-codex-command.test.mjs",
     "node --test plugins/hobbyka-hub/tests/*.test.mjs",
-    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test"
+    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test",
+    "node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs"
   ],
   "limitations": [
-    "The final released binary still requires confirmation on Valera's original Windows installation command."
+    "No reachable Windows runner was available; Valera must repeat the original install command with the released Hub version."
   ],
   "residual_risks": [
-    "A Windows image without the inbox tar.exe tool would fail explicitly at process launch; the reported Windows environment already demonstrated tar.exe."
+    "A custom HOBBYKA_CODEX_COMMAND containing cmd metacharacters is rejected instead of executed."
   ],
   "notes": [
-    "The existing isSafeEntry validation still runs before every extraction."
+    "No dependency was added and shell:true is intentionally not used because Node.js DEP0190 warns that its args array is not escaped."
   ]
 }
