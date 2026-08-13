@@ -5,27 +5,27 @@
 > The same reproducer changed from failing to passing and broader checks passed.
 
 **Project:** Hobbyka Hub  
-**Bug:** Windows Hub loses archive paths passed to PowerShell  
-**Environment:** Reported on Windows, PowerShell 5.1, Node.js 24.19.0, Hobbyka Hub 0.4.26; focused regression and archive lifecycle verified on macOS.  
+**Bug:** Windows Hub cannot start the Codex cmd shim  
+**Environment:** Reported on Windows with Hobbyka Hub 0.4.26 and Node.js 24; focused regression verified on macOS because no reachable Windows runner was available.  
 **Generated:** 2026-08-13
 
 ## Original report
 
-On Windows with Hobbyka Hub 0.4.26, install onec-direct-cli fails because PowerShell 5.1 receives empty positional arguments for ZIP listing and extraction.
+Hobbyka Hub 0.4.26 downloads hobbyka-agent-chat on Windows but fails before registration with spawnSync codex.cmd EINVAL; selecting a protected executable directly produces EPERM.
 
 | Contract | Expected | Actual |
 |---|---|---|
-| Observed behavior | Hub validates the downloaded ZIP paths, extracts the plugin, and completes installation. | ZipFile.OpenRead receives an empty path and Node then fails to open the missing .entries file. |
+| Observed behavior | Hub invokes the installed Codex CLI, registers hobbyka-agent-chat@hobbyka-hub, and confirms installation. | Node.js 24 rejects direct execution of codex.cmd with EINVAL, so installation exits before registration and confirmation. |
 
 ## Minimal reproduction
 
-A focused source regression test requires every Windows archive operation to use the system tar.exe path and rejects the broken PowerShell positional-argument pattern.
+A focused test requires .cmd shims to be routed through cmd.exe without shell:true, verifies quoting, rejects cmd metacharacters, and keeps marketplace paths out of the command string.
 
-**Confirming signal:** The focused test exits 1 because Hub 0.4.26 still invokes powershell.exe with $args after -Command.
+**Confirming signal:** The focused test exits 1 because the shared process helper directly passes codex.cmd to spawnSync and has no safe Windows command path.
 
 ### Reproduction files
 
-- [windows-archive-output.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs:7) — Focused regression for all Windows archive operations.
+- [windows-codex-command.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7) — Focused Windows cmd invocation and injection regression test.
 
 ## Red to green evidence
 
@@ -33,14 +33,14 @@ A focused source regression test requires every Windows archive operation to use
 |---|---:|---:|
 | Exit code | 1 | 0 |
 | Timed out | False | False |
-| Duration | 60.246 ms | 51.501 ms |
+| Duration | 63.711 ms | 62.008 ms |
 | Same command | — | True |
 | Broader suite | — | passed |
 
 ### Before — failing evidence
 
 ```text
-✖ Windows archive operations avoid PowerShell argument binding (0.870084ms)
+✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (3.86725ms)
 ℹ tests 1
 ℹ suites 0
 ℹ pass 0
@@ -48,55 +48,34 @@ A focused source regression test requires every Windows archive operation to use
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 32.437417
+ℹ duration_ms 36.86975
 
 ✖ failing tests:
 
-test at plugins/hobbyka-hub/tests/windows-archive-output.test.mjs:7:1
-✖ Windows archive operations avoid PowerShell argument binding (0.870084ms)
-  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /capture\("tar\.exe", \["-tf", archive\]\)/. Input:
+test at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7:1
+✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (3.86725ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
   
-  '#!/usr/bin/env node\n' +
-    'import { createHash, randomUUID } from "node:crypto";\n' +
-    'import { createWriteStream, readFileSync } from "node:fs";\n' +
-    'import { access, chmod, copyFile, cp, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";\n' +
-    'import { arch, homedir, platform, tmpdir } from "node:os";\n' +
-    'import { basename, dirname, join, resolve } from "node:path";\n' +
-    'import { spawnSync } from "node:child_process";\n' +
-    'import { Readable, Transform } from "node:stream";\n' +
-    'import { pipeline } from "node:stream/promises";\n' +
-    'import { fileURLToPath } from "node:url";\n' +
-    '\n' +
-    'const script = fileURLToPath(import.meta.url);\n' +
-    'if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {\n' +
-    '  const result = spawnSync(process.execPath, [...process.execArgv, script, ...process.argv.slice(2)], { env: { ...process.env, NODE_EXTRA_CA_CERTS: join(dirname(script), "..", "assets", "hobbyka-chat-root.crt"), HOBBYKA_HUB_CA_READY: "1" }, stdio: "inherit" });\n' +
-    '  process.exit(result.status ?? 1);\n' +
-    '}\n' +
-    '\n' +
-    'const [command, ...args] = process.argv.slice(2);\n' +
-    'const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\\/$/, "");\n' +
-    'const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\\/$/, "");\n' +
-    'const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";\n' +
-    'if (command === "report-bug") await submitReport(args, "bug");\n' +
-    'else if (command === "idea") await submitReport(args, "idea");\n' +
-    'else if (command === "install") await install(args[0]);\n' +
-    'else if (command === "publish") await publish(args[0]);\n' +
-    'else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));\n' +
-    'else if (command === "update") await update(args.includes("--quiet"));\n' +
-    'else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();\n' +
-    'else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();\n' +
-    'else if (command === "self-test") await selfTest();\n' +
-    'else fail("Использование:\\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\\n  hobbyka-
-... [output truncated] ...
-alue === "--stdin") result.stdin = true;\n    else if (value === "--body-file" && args[index + 1]) result.bodyFile = args[++index];\n    else if (value.startsWith("--body-file=")) result.bodyFile = value.slice(12);\n    else if (value === "--confirm") result.confirm = true;\n    else if (value === "--file" && args[index + 1]) result.files.push(args[++index]);\n    else if (value.startsWith("--file=")) result.files.push(value.slice(7));\n    else if (value === "--operation" && args[index + 1]) result.operation = args[++index];\n    else if (value.startsWith("--operation=")) result.operation = value.slice(12);\n    else return { ok: false, error: ˋНеизвестный аргумент: ${value}ˋ };\n  }\n  if (result.stdin === Boolean(result.bodyFile)) return { ok: false, error: "Нужен ровно один источник текста: --stdin или --body-file PATH." };\n  if (result.files.length > 5) return { ok: false, error: "Можно приложить не больше 5 файлов." };\n  if (result.operation && !validUUID(result.operation)) return { ok: false, error: "--operation должен быть UUID." };\n  return result;\n}\n\nfunction derivedOperationID(operation, index) {\n  const value = createHash("sha256").update(ˋ${operation}:attachment:${index}ˋ).digest().subarray(0, 16);\n  value[6] = (value[6] & 0x0f) | 0x50;\n  value[8] = (value[8] & 0x3f) | 0x80;\n  const hex = value.toString("hex");\n  return ˋ${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}ˋ;\n}\n\nfunction validUUID(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? ""); }\nfunction reportAction(kind) { return kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug"; }\nfunction reportRef(kind, id) { return { type: kind, id, ref: ˋ${kind}:${id}ˋ }; }\nfunction validReport(report, kind) { return report !== null && typeof report === "object" && validUUID(report.id) && report.kind === kind; }\nfunction localProvenance() { return { source: "local", freshness: new Date().toISOString() }; }\nfunction jsonFailure(status, code, message, exitCode, refs = []) { return printJSON({ status, result: { code, message: String(message).trim() }, refs }, exitCode); }\nfunction printJSON(value, exitCode) { console.log(JSON.stringify(value)); process.exitCode = exitCode; return value; }\n\nasync function install(slug, { update = false, quiet = false } = {}) {\n  if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");\n  const response = await hubFetch(ˋ${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}&target=${platformTarget()}ˋ, undefined, quiet);\n  if (!response) return;\n  if (!response.ok) fail(await response.text());\n\n  const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");\n  const pluginRoot = join(codexRoot, "plugins", slug);\n  const temp = await mkdtemp'... 27580 more characters,
-    expected: /capture\("tar\.exe", \["-tf", archive\]\)/,
-    operator: 'mat
+    assert.ok(definition)
+  
+      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:9:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.start (node:internal/test_runner/test:1003:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
 ```
 
 ### After — fixed evidence
 
 ```text
-✔ Windows archive operations avoid PowerShell argument binding (0.464292ms)
+✔ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (0.666375ms)
 ℹ tests 1
 ℹ suites 0
 ℹ pass 1
@@ -104,37 +83,38 @@ alue === "--stdin") result.stdin = true;\n    else if (value === "--body-file" &
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 30.496791
+ℹ duration_ms 35.481833
 ```
 
 ## Root cause
 
-Windows PowerShell 5.1 does not bind the trailing process arguments to $args as the Hub command strings assumed. Listing, extraction, and ZIP creation shared the broken pattern.
+Windows .cmd files are shell scripts rather than directly executable programs. Hub passed codex.cmd to spawnSync without cmd.exe, which Node.js documents as unsupported on Windows.
 
 ## Applied fix
 
-Use Windows' built-in tar.exe for ZIP listing, extraction, and creation while preserving path validation before extraction.
+Route only Windows .cmd and .bat executables through cmd.exe /d /s /c with explicit quoting, metacharacter rejection, hidden execution, and verbatim arguments; keep all native executables on direct spawnSync.
 
-**Why this is causal:** The fix removes the failed PowerShell argument boundary entirely; the same tar listing and extraction already completed the reported Windows user path on a temporary copy.
+**Why this is causal:** The corrected shared helper handles every Codex CLI call and removes the direct .cmd execution that produced EINVAL without enabling Node's unsafe shell:true argument concatenation.
 
 ### Production fix files
 
-- [hobbyka-hub.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs:409) — Replace PowerShell ZIP operations with tar.exe.
-- [plugin.json](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json:4) — Release version 0.4.27.
+- [hobbyka-hub.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs:422) — Safe .cmd/.bat execution in the shared process helper.
+- [plugin.json](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json:3) — Release version 0.4.28.
 
 ## Verification
 
 | Check | Status | Evidence |
 |---|---|---|
-| Focused regression | ✅ passed | The same test changed from exit 1 to exit 0. |
-| Hub test suite | ✅ passed | All three tests passed. |
+| Focused regression | ✅ passed | The same command changed from exit 1 to exit 0. |
+| Hub test suite | ✅ passed | All four tests passed. |
 | Hub self-test | ✅ passed | hobbyka-hub self-test: ok |
-| Archive lifecycle | ✅ passed | Created, listed, and extracted a ZIP with the same tar argument structure. |
+| Syntax check | ✅ passed | node --check completed successfully. |
+| Plugin validation | ✅ passed | Codex plugin validation passed. |
 
 ## Reproduce
 
 ```bash
-node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs
+node --test plugins/hobbyka-hub/tests/windows-codex-command.test.mjs
 ```
 ```bash
 node --test plugins/hobbyka-hub/tests/*.test.mjs
@@ -142,18 +122,21 @@ node --test plugins/hobbyka-hub/tests/*.test.mjs
 ```bash
 node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test
 ```
+```bash
+node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs
+```
 
 ## Limitations
 
-- The final released binary still requires confirmation on Valera's original Windows installation command.
+- No reachable Windows runner was available; Valera must repeat the original install command with the released Hub version.
 
 ## Residual risks
 
-- A Windows image without the inbox tar.exe tool would fail explicitly at process launch; the reported Windows environment already demonstrated tar.exe.
+- A custom HOBBYKA_CODEX_COMMAND containing cmd metacharacters is rejected instead of executed.
 
 ## Notes
 
-- The existing isSafeEntry validation still runs before every extraction.
+- No dependency was added and shell:true is intentionally not used because Node.js DEP0190 warns that its args array is not escaped.
 
 ---
 

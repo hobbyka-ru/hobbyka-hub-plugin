@@ -360,7 +360,7 @@ async function configureMarketplace(codexRoot) {
   const existing = marketplaces.find((marketplace) => marketplace.name === "hobbyka-hub");
   if (managedMarketplace(existing, codexRoot)) return;
   if (existing) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka-hub"]);
-  run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
+  run(codexCommand(), ["plugin", "marketplace", "add", "."], codexRoot);
   run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
 }
 
@@ -419,8 +419,10 @@ function windowsLauncher(node, updater, codex) { const escape = (value) => value
 function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
 function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
 function linuxUnits(node, updater, codex, home = homedir()) { return { service: `[Unit]\nDescription=Update Hobbyka Hub plugins\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nEnvironment=${systemdQuote(`HOBBYKA_CODEX_COMMAND=${codex}`)}\nEnvironment=${systemdQuote(`HOME=${home}`)}\nExecStart=${systemdQuote(node)} ${systemdQuote(updater)} update --quiet\n`, timer: `[Unit]\nDescription=Check Hobbyka Hub plugin updates every 15 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n` }; }
-function run(executable, args, cwd, allowFailure = false) { const result = spawnSync(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); }
-function capture(executable, args) { const result = spawnSync(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
+function windowsCommand(executable, args) { const values = [executable, ...args].map(String); if (values.some((value) => /[\r\n"&|<>^%!]/.test(value))) fail("Команда Windows содержит небезопасный аргумент."); return values.map((value) => `"${value}"`).join(" "); }
+function spawnProcess(executable, args, options) { if (platform() !== "win32" || !/\.(?:cmd|bat)$/i.test(executable)) return spawnSync(executable, args, options); const command = `"${windowsCommand(executable, args)}"`; return spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", command], { ...options, windowsHide: true, windowsVerbatimArguments: true }); }
+function run(executable, args, cwd, allowFailure = false) { const result = spawnProcess(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); }
+function capture(executable, args) { const result = spawnProcess(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
