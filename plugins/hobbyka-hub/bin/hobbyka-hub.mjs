@@ -83,7 +83,8 @@ async function submitReport(args, kind) {
     attachmentIDs.push(attachment.id);
   }
   let response;
-  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, body, attachment_ids: attachmentIDs, operation_id: operation }), signal }); }
+  const targetThreadID = validUUID(process.env.CODEX_THREAD_ID) ? process.env.CODEX_THREAD_ID : undefined;
+  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, body, attachment_ids: attachmentIDs, target_thread_id: targetThreadID, operation_id: operation }), signal }); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
   let report;
