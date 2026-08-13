@@ -1,6 +1,6 @@
 {
   "name": "hobbyka-hub",
-  "version": "0.4.24",
+  "version": "0.4.25",
   "description": "Установка и публикация плагинов Hobbyka Hub, предложения изменений, ошибки и идеи.",
   "author": { "name": "Hobbyka" },
   "skills": "./skills/",
