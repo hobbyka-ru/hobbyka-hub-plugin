@@ -1,24 +1,75 @@
 {
-  "title": "Windows ZIP listing still fails through PowerShell stdout",
+  "title": "Windows Hub loses archive paths passed to PowerShell",
   "project": "Hobbyka Hub",
   "generated_at": "2026-08-13",
   "mode": "prove-fix",
-  "original_report": "Valera confirmed that install onec-direct-cli still fails on Windows with an unsafe-path error in Hobbyka Hub 0.4.23.",
-  "discovery_scope": ["Windows archive listing in hobbyka-hub.mjs", "live onec-direct-cli Windows ZIP", "Hub regression tests"],
+  "original_report": "On Windows with Hobbyka Hub 0.4.26, install onec-direct-cli fails because PowerShell 5.1 receives empty positional arguments for ZIP listing and extraction.",
+  "discovery_scope": [
+    "plugins/hobbyka-hub/bin/hobbyka-hub.mjs archive listing, extraction, and creation",
+    "plugins/hobbyka-hub/tests/windows-archive-output.test.mjs"
+  ],
   "candidates": [],
-  "expected": "A valid onec-direct-cli ZIP installs on Windows.",
-  "actual": "The safe ZIP is rejected while entry names pass through PowerShell stdout.",
-  "environment": "Windows report from Hobbyka Hub 0.4.23; local deterministic source-level regression on macOS arm64",
-  "reproduction": "The focused test requires the Windows path to bypass PowerShell stdout and read an explicitly UTF-8 listing file.",
-  "failure_signal": "The test exits 1 while listArchive still captures PowerShell stdout.",
-  "root_cause": "Setting Console.OutputEncoding was insufficient in the reporter's Windows PowerShell host; archive entry names still crossed an unreliable text-encoding boundary.",
-  "fix_summary": "PowerShell writes archive entry names directly to an explicit UTF-8 file, which Node reads with readFileSync; version bumped to 0.4.25.",
-  "why_causal": "The unsafe stdout encoding boundary is no longer used.",
-  "reproduction_files": [{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs","line":1,"summary":"Regression test requiring file-based UTF-8 transfer."}],
-  "fix_files": [{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs","line":1,"summary":"File-based Windows archive listing."},{"path":"/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-archive-file-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json","line":3,"summary":"Version 0.4.25."}],
-  "checks": [{"name":"Focused regression","status":"passed","detail":"Exit 1 before, exit 0 after."},{"name":"Hub suite","status":"passed","detail":"Self-test and all Node tests pass."}],
-  "reproduce": ["node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs", "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test", "node --test plugins/hobbyka-hub/tests/*.test.mjs"],
-  "limitations": ["Final end-to-end confirmation must be performed on Valera's Windows machine."],
-  "residual_risks": ["A different Windows-only extraction failure may surface after path validation succeeds."],
-  "notes": ["The onec-direct-cli package is unchanged and its live ZIP remains valid."]
+  "expected": "Hub validates the downloaded ZIP paths, extracts the plugin, and completes installation.",
+  "actual": "ZipFile.OpenRead receives an empty path and Node then fails to open the missing .entries file.",
+  "environment": "Reported on Windows, PowerShell 5.1, Node.js 24.19.0, Hobbyka Hub 0.4.26; focused regression and archive lifecycle verified on macOS.",
+  "reproduction": "A focused source regression test requires every Windows archive operation to use the system tar.exe path and rejects the broken PowerShell positional-argument pattern.",
+  "failure_signal": "The focused test exits 1 because Hub 0.4.26 still invokes powershell.exe with $args after -Command.",
+  "root_cause": "Windows PowerShell 5.1 does not bind the trailing process arguments to $args as the Hub command strings assumed. Listing, extraction, and ZIP creation shared the broken pattern.",
+  "fix_summary": "Use Windows' built-in tar.exe for ZIP listing, extraction, and creation while preserving path validation before extraction.",
+  "why_causal": "The fix removes the failed PowerShell argument boundary entirely; the same tar listing and extraction already completed the reported Windows user path on a temporary copy.",
+  "reproduction_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
+      "line": 7,
+      "summary": "Focused regression for all Windows archive operations."
+    }
+  ],
+  "fix_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
+      "line": 409,
+      "summary": "Replace PowerShell ZIP operations with tar.exe."
+    },
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-powershell-args-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json",
+      "line": 4,
+      "summary": "Release version 0.4.27."
+    }
+  ],
+  "checks": [
+    {
+      "name": "Focused regression",
+      "status": "passed",
+      "detail": "The same test changed from exit 1 to exit 0."
+    },
+    {
+      "name": "Hub test suite",
+      "status": "passed",
+      "detail": "All three tests passed."
+    },
+    {
+      "name": "Hub self-test",
+      "status": "passed",
+      "detail": "hobbyka-hub self-test: ok"
+    },
+    {
+      "name": "Archive lifecycle",
+      "status": "passed",
+      "detail": "Created, listed, and extracted a ZIP with the same tar argument structure."
+    }
+  ],
+  "reproduce": [
+    "node --test plugins/hobbyka-hub/tests/windows-archive-output.test.mjs",
+    "node --test plugins/hobbyka-hub/tests/*.test.mjs",
+    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test"
+  ],
+  "limitations": [
+    "The final released binary still requires confirmation on Valera's original Windows installation command."
+  ],
+  "residual_risks": [
+    "A Windows image without the inbox tar.exe tool would fail explicitly at process launch; the reported Windows environment already demonstrated tar.exe."
+  ],
+  "notes": [
+    "The existing isSafeEntry validation still runs before every extraction."
+  ]
 }
