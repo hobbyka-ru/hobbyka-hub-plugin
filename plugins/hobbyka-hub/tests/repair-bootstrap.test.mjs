@@ -53,3 +53,7 @@ test("self-test skips only Unix executable bits on Windows", () => {
   assert.match(source, /if \(platform\(\) !== "win32"\) \{[\s\S]*?restoreExecutableScripts\(fixture\)[\s\S]*?executable script restoration failed[\s\S]*?\}/);
   assert.match(source, /await runPostUpdateHook\(fixture, marker\)/);
 });
+
+test("self-update reads the ref-qualified public manifest", () => {
+  assert.match(source, /raw\.githubusercontent\.com[\s\S]*?\/refs\/heads\/main\/plugins\/hobbyka-hub\/\.codex-plugin\/plugin\.json/);
+});
