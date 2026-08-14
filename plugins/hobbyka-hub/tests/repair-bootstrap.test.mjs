@@ -1,0 +1,32 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+const source = await readFile(new URL("../bin/hobbyka-hub.mjs", import.meta.url), "utf8");
+
+test("repair bootstraps the managed marketplace before updating legacy plugins", () => {
+  assert.match(source, /command === "repair"/);
+  const repair = source.match(/async function repair\(\) \{[\s\S]*?\n\}/)?.[0] ?? "";
+  assert.match(repair, /configureMarketplace/);
+  assert.match(repair, /enableAutoupdate/);
+  assert.match(repair, /await update/);
+});
+
+test("normal install immediately reconciles legacy Hobbyka plugins", () => {
+  const dispatch = source.match(/else if \(command === "install"\)[^\n]+/)?.[0] ?? "";
+  assert.match(dispatch, /installAndReconcile/);
+});
+
+test("macOS repair script preserves Agent Chat state and verifies the real services", async () => {
+  const scriptURL = new URL("../../../scripts/repair-elvira-macos.sh", import.meta.url);
+  const repair = await readFile(scriptURL, "utf8");
+  execFileSync("/bin/sh", ["-n", scriptURL.pathname]);
+  assert.match(repair, /"\$bootstrap" repair/);
+  assert.match(repair, /install hobbyka-agent-chat/);
+  assert.match(repair, /inbox status/);
+  assert.match(repair, /ru\.hobbyka\.hub-updater/);
+  assert.match(repair, /ru\.hobbyka\.agent-chat-updater/);
+  assert.match(repair, /state_hash/);
+  assert.doesNotMatch(repair, /rm -rf [^"']*(?:AgentChat|\.codex)/);
+});

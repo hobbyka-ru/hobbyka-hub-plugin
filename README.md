@@ -8,3 +8,9 @@ codex plugin add hobbyka-hub@hobbyka-hub
 ```
 
 После установки логин и токен не нужны. Подключите VPN-профиль Хоббики: по нему ХАБ определяет сотрудника.
+
+Безопасное восстановление старой macOS-установки с сохранением Agent Chat и Inbox:
+
+```sh
+sh scripts/repair-elvira-macos.sh
+```
