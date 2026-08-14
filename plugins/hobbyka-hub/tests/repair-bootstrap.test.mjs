@@ -54,6 +54,8 @@ test("self-test skips only Unix executable bits on Windows", () => {
   assert.match(source, /await runPostUpdateHook\(fixture, marker\)/);
 });
 
-test("self-update reads the ref-qualified public manifest", () => {
-  assert.match(source, /raw\.githubusercontent\.com[\s\S]*?\/refs\/heads\/main\/plugins\/hobbyka-hub\/\.codex-plugin\/plugin\.json/);
+test("self-update reads the manifest from the downloaded archive", () => {
+  assert.doesNotMatch(source, /raw\.githubusercontent\.com/);
+  assert.match(source, /const latest = JSON\.parse\(await readFile\(join\(source, "\.codex-plugin", "plugin\.json"\), "utf8"\)\)/);
+  assert.ok(source.indexOf("archive/refs/heads/main.zip") < source.indexOf("const latest = JSON.parse"));
 });

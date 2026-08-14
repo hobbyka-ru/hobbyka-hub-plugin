@@ -211,10 +211,7 @@ async function updatePublicHub(quiet) {
   let currentRoot = pluginRoot;
   try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
-  let latest;
-  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/refs/heads/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
   const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
-  if (latest.version === current.version) return false;
   const response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" });
   if (!response.ok) { if (!quiet) fail("Не удалось скачать обновление Hobbyka Hub."); return false; }
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-self-update-"));
@@ -225,7 +222,8 @@ async function updatePublicHub(quiet) {
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В обновлении Hobbyka Hub найден небезопасный путь.");
     extractArchive(archive, temp);
     const source = join(temp, entries[0].split(/[\\/]/)[0], "plugins", "hobbyka-hub");
-    await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8");
+    const latest = JSON.parse(await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8"));
+    if (latest.version === current.version) return false;
     await rm(pluginRoot, { recursive: true, force: true });
     await cp(source, pluginRoot, { recursive: true });
     await writeMarketplace(dirname(dirname(pluginRoot)));
