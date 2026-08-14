@@ -16,18 +16,37 @@ function Run([string]$File, [string[]]$Arguments) {
 }
 function Read-JsonCommand([string]$File, [string[]]$Arguments) {
   $output = & $File @Arguments | Out-String
-  if ($LASTEXITCODE -ne 0) { Fail "команда проверки завершилась с кодом $LASTEXITCODE`: $File" }
-  return $output | ConvertFrom-Json
+  $code = $LASTEXITCODE
+  $parsed = $output | ConvertFrom-Json
+  if ($parsed.status -eq "outcome_unknown") { Fail "исход отправки неизвестен; не запускайте сценарий повторно, передайте этот вывод Даниилу" }
+  if ($code -ne 0) { Fail "команда проверки завершилась с кодом $code`: $File" }
+  return $parsed
+}
+function Read-JsonInputCommand([string]$File, [string[]]$Arguments, [string]$InputText) {
+  $output = $InputText | & $File @Arguments | Out-String
+  $code = $LASTEXITCODE
+  $parsed = $output | ConvertFrom-Json
+  if ($parsed.status -eq "outcome_unknown") { Fail "исход отправки неизвестен; не запускайте сценарий повторно, передайте этот вывод Даниилу" }
+  if ($code -ne 0) { Fail "команда отправки завершилась с кодом $code`: $File" }
+  return $parsed
 }
 
 if ($env:OS -ne "Windows_NT") { Fail "скрипт предназначен для Windows" }
 $codex = Find-Command @("codex.cmd", "codex.exe", "codex") @()
-$node = Find-Command @("node.exe", "node") @(
+$nodeCandidates = @(
   (Join-Path $env:ProgramFiles "nodejs\node.exe"),
   (Join-Path $env:LOCALAPPDATA "Programs\nodejs\node.exe")
 )
+$node = Find-Command @("node.exe", "node") $nodeCandidates
 if (-not $codex) { Fail "не найден Codex" }
-if (-not $node) { Fail "не найден Node.js" }
+if (-not $node) {
+  $winget = Find-Command @("winget.exe", "winget") @()
+  if (-not $winget) { Fail "не найдены Node.js и штатный установщик winget" }
+  Write-Host "Устанавливаю официальный Node.js LTS…"
+  Run $winget @("install", "--id", "OpenJS.NodeJS.LTS", "--exact", "--silent", "--accept-package-agreements", "--accept-source-agreements")
+  $node = Find-Command @("node.exe", "node") $nodeCandidates
+  if (-not $node) { Fail "Node.js установлен, но node.exe не найден; откройте новый PowerShell и повторите" }
+}
 
 $work = Join-Path ([IO.Path]::GetTempPath()) ("hobbyka-repair-" + [guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $work | Out-Null
@@ -40,7 +59,7 @@ try {
     try { $oldTarget = (Read-JsonCommand $oldService @("inbox", "status")).result.route.target_thread_id } catch { }
   }
 
-  Write-Host "1/4 Загружаю официальный Hobbyka Hub…"
+  Write-Host "1/5 Загружаю официальный Hobbyka Hub…"
   [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
   $archive = Join-Path $work "hobbyka-hub.zip"
   Invoke-WebRequest -UseBasicParsing -Uri "https://github.com/hobbyka-ru/hobbyka-hub-plugin/archive/refs/heads/main.zip" -OutFile $archive
@@ -48,7 +67,7 @@ try {
   $bootstrap = Join-Path $work "hobbyka-hub-plugin-main\plugins\hobbyka-hub\bin\hobbyka-hub.mjs"
   if (-not (Test-Path -LiteralPath $bootstrap)) { Fail "в официальном архиве нет Hobbyka Hub" }
 
-  Write-Host "2/4 Восстанавливаю единый обновлятор и переношу старые установки…"
+  Write-Host "2/5 Восстанавливаю единый обновлятор и переношу старые установки…"
   $env:HOBBYKA_CODEX_COMMAND = $codex
   Run $node @($bootstrap, "repair")
 
@@ -56,19 +75,21 @@ try {
   $hub = Join-Path $managed "hobbyka-hub\bin\hobbyka-hub.mjs"
   if (-not (Test-Path -LiteralPath $hub)) { Fail "Hobbyka Hub не зарегистрирован в Codex" }
 
-  Write-Host "3/4 Переустанавливаю актуальный Agent Chat без удаления его данных…"
+  Write-Host "3/5 Переустанавливаю актуальный Agent Chat без удаления его данных…"
   Run $node @($hub, "install", "hobbyka-agent-chat")
   Run $node @($hub, "self-test")
 
-  $hchat = Join-Path $managed "hobbyka-agent-chat\scripts\hchat.ps1"
+  $agentRoot = Join-Path $managed "hobbyka-agent-chat"
+  $arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+  $hchat = Join-Path $agentRoot "bin\windows-$arch\hchat.exe"
   if (-not (Test-Path -LiteralPath $hchat)) { Fail "Agent Chat не установлен" }
-  $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source
-  $prefix = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $hchat)
-  $version = Read-JsonCommand $powershell ($prefix + @("version"))
-  $status = Read-JsonCommand $powershell ($prefix + @("inbox", "status"))
+  if (-not $env:HCHAT_SERVER) { $env:HCHAT_SERVER = "https://172.29.172.1" }
+  if (-not $env:HCHAT_CA_FILE) { $env:HCHAT_CA_FILE = Join-Path $agentRoot "assets\hobbyka-chat-root.crt" }
+  $version = Read-JsonCommand $hchat @("version")
+  $status = Read-JsonCommand $hchat @("inbox", "status")
   $plugins = Read-JsonCommand $codex @("plugin", "list", "--json")
 
-  Write-Host "4/4 Проверяю версии, Inbox и фоновые задачи…"
+  Write-Host "4/5 Проверяю версии, Inbox и фоновые задачи…"
   if ([version]($version.result.version) -lt [version]"0.6.11") { Fail "Agent Chat остался на версии $($version.result.version)" }
   if (-not $status.result.route.target_thread_id) { Fail "Inbox не привязан к задаче Codex" }
   if (-not $status.result.router.installed -or -not $status.result.router.running) { Fail "Router Agent Chat не работает" }
@@ -93,7 +114,34 @@ try {
   & schtasks.exe /Query /TN "Hobbyka Agent Chat Updater" *> $null
   if ($LASTEXITCODE -eq 0) { Fail "устаревший обновлятор Agent Chat всё ещё зарегистрирован" }
 
-  Write-Host "`nГОТОВО: Hobbyka Hub и Agent Chat переустановлены и обновлены; данные и Inbox сохранены; Router и единый автообновлятор работают."
+  Write-Host "5/5 Отправляю Даниилу тестовое сообщение и проверяю ответ…"
+  $directory = Read-JsonCommand $hchat @("find", "colleague", "ardanila")
+  $person = @($directory.result.items | Where-Object { $_.handle -eq "ardanila" })
+  if ($person.Count -ne 1) { Fail "не найден единственный профиль @ardanila" }
+  $userRef = "user:$($person[0].id)"
+  $opened = Read-JsonCommand $hchat @("open", $userRef, "--confirm")
+  $conversation = @($opened.refs | Where-Object { $_.type -eq "conversation" }) | Select-Object -First 1
+  if (-not $conversation) { Fail "не удалось открыть прямой чат с @ardanila" }
+  $conversationRef = "conversation:$($conversation.id)"
+  $nonce = [guid]::NewGuid().ToString("N")
+  $expected = "HOBBYKA_AGENT_CHAT_OK $nonce"
+  $message = "Тест связи после восстановления Agent Chat на Windows. Ответьте ровно: $expected"
+  $sent = Read-JsonInputCommand $hchat @("send", $conversationRef, "--stdin", "--confirm") $message
+  $sentMessage = @($sent.refs | Where-Object { $_.type -eq "message" }) | Select-Object -First 1
+  if (-not $sentMessage) { Fail "сервер не подтвердил отправленное тестовое сообщение" }
+
+  $reply = $null
+  for ($attempt = 0; $attempt -lt 60 -and -not $reply; $attempt++) {
+    if ($attempt -gt 0) { Start-Sleep -Seconds 5 }
+    $messages = Read-JsonCommand $hchat @("read", $conversationRef)
+    $reply = @($messages.result.items | Where-Object {
+      $_.sender_user_id -eq $person[0].id -and $_.id -ne $sentMessage.id -and $_.body_markdown -match [regex]::Escape($expected)
+    }) | Select-Object -Last 1
+  }
+  if (-not $reply) { Fail "за 5 минут не получен проверочный ответ от @ardanila с кодом $nonce" }
+  Read-JsonCommand $hchat @("mark-read", "message:$($reply.id)", "--confirm") | Out-Null
+
+  Write-Host "`nГОТОВО: всё переустановлено; данные и Inbox сохранены; Router и автообновление работают; тестовое сообщение доставлено, ответ @ardanila подтверждён."
 } finally {
   Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue
 }

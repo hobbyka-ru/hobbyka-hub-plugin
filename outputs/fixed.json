@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
   "label": "fixed",
-  "captured_at": "2026-08-13T15:24:46.988948+00:00",
+  "captured_at": "2026-08-14T09:34:17.773342+00:00",
   "command": [
     "node",
     "--test",
-    "plugins/hobbyka-hub/tests/windows-codex-command.test.mjs"
+    "plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs"
   ],
-  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813",
+  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-roundtrip-20260814",
   "runtime": "Python 3.9.6 on Darwin arm64",
-  "duration_ms": 62.008,
+  "duration_ms": 56.755,
   "exit_code": 0,
   "timed_out": false,
-  "stdout": "\u2714 Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (0.666375ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 1\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 35.481833\n",
+  "stdout": "\u2714 repair bootstraps the managed marketplace before updating legacy plugins (0.331375ms)\n\u2714 normal install immediately reconciles legacy Hobbyka plugins (0.060834ms)\n\u2714 macOS repair script preserves Agent Chat state and verifies the real services (5.840292ms)\n\u2714 Windows repair script preserves Agent Chat state and verifies scheduled tasks (0.759042ms)\n\u2139 tests 4\n\u2139 suites 0\n\u2139 pass 4\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 35.801042\n",
   "stderr": "",
   "stdout_truncated": false,
   "stderr_truncated": false,

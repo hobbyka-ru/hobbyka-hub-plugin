@@ -20,3 +20,6 @@ sh scripts/repair-elvira-macos.sh
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\repair-elvira-windows.ps1
 ```
+
+Если Node.js отсутствует, сценарий устанавливает официальный LTS через `winget`.
+В конце он отправляет `@ardanila` одноразовое тестовое сообщение и подтверждает ответ с тем же кодом.

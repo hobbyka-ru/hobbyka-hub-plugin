@@ -1,40 +1,35 @@
 {
-  "title": "Windows Hub cannot start the Codex cmd shim",
+  "title": "Windows repair requires Node and does not verify Agent Chat round-trip",
   "project": "Hobbyka Hub",
-  "generated_at": "2026-08-13",
+  "generated_at": "2026-08-14",
   "mode": "prove-fix",
-  "original_report": "Hobbyka Hub 0.4.26 downloads hobbyka-agent-chat on Windows but fails before registration with spawnSync codex.cmd EINVAL; selecting a protected executable directly produces EPERM.",
+  "original_report": "Elvira's Windows repair must install Node.js if it is absent, send one test message to @ardanila, and finish only after confirming the matching reply.",
   "discovery_scope": [
-    "plugins/hobbyka-hub/bin/hobbyka-hub.mjs shared run and capture helpers",
-    "all Codex CLI call sites used by install, update, and marketplace registration",
-    "Node.js child_process documentation for Windows cmd files and DEP0190"
+    "scripts/repair-elvira-windows.ps1",
+    "plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs",
+    "Agent Chat direct conversation CLI contract"
   ],
   "candidates": [],
-  "expected": "Hub invokes the installed Codex CLI, registers hobbyka-agent-chat@hobbyka-hub, and confirms installation.",
-  "actual": "Node.js 24 rejects direct execution of codex.cmd with EINVAL, so installation exits before registration and confirmation.",
-  "environment": "Reported on Windows with Hobbyka Hub 0.4.26 and Node.js 24; focused regression verified on macOS because no reachable Windows runner was available.",
-  "reproduction": "A focused test requires .cmd shims to be routed through cmd.exe without shell:true, verifies quoting, rejects cmd metacharacters, and keeps marketplace paths out of the command string.",
-  "failure_signal": "The focused test exits 1 because the shared process helper directly passes codex.cmd to spawnSync and has no safe Windows command path.",
-  "root_cause": "Windows .cmd files are shell scripts rather than directly executable programs. Hub passed codex.cmd to spawnSync without cmd.exe, which Node.js documents as unsupported on Windows.",
-  "fix_summary": "Route only Windows .cmd and .bat executables through cmd.exe /d /s /c with explicit quoting, metacharacter rejection, hidden execution, and verbatim arguments; keep all native executables on direct spawnSync.",
-  "why_causal": "The corrected shared helper handles every Codex CLI call and removes the direct .cmd execution that produced EINVAL without enabling Node's unsafe shell:true argument concatenation.",
+  "expected": "The repair installs official Node.js LTS when needed, preserves Agent Chat data and Inbox routing, sends one nonce-bearing message to @ardanila, and confirms a reply from that exact profile with the same nonce.",
+  "actual": "The previous repair stopped when Node.js was absent and declared success after local service checks without testing message delivery or a reply.",
+  "environment": "Windows target; deterministic script-contract regression run on macOS because no reachable Windows runner was available.",
+  "reproduction": "A focused test inspects the public Windows repair and requires the winget Node.js LTS installation plus find, open, send, read, and mark-read commands for the exact @ardanila conversation.",
+  "failure_signal": "The focused test exits 1 because the previous script contains neither the winget Node.js installation nor the Agent Chat round-trip.",
+  "root_cause": "The repair treated Node.js as a prerequisite and ended after local health checks; it had no end-to-end communication acceptance check.",
+  "fix_summary": "Install official Node.js LTS through winget when missing, then use the installed hchat binary to open the exact @ardanila profile, send one nonce-bearing test message, wait at most five minutes for the matching reply, and mark it read.",
+  "why_causal": "The changed script now supplies its missing runtime prerequisite and makes the requested remote round-trip the condition for success.",
   "reproduction_files": [
     {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs",
-      "line": 7,
-      "summary": "Focused Windows cmd invocation and injection regression test."
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-roundtrip-20260814/plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs",
+      "line": 34,
+      "summary": "Focused Windows repair contract regression."
     }
   ],
   "fix_files": [
     {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
-      "line": 422,
-      "summary": "Safe .cmd/.bat execution in the shared process helper."
-    },
-    {
-      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json",
-      "line": 3,
-      "summary": "Release version 0.4.28."
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-roundtrip-20260814/scripts/repair-elvira-windows.ps1",
+      "line": 34,
+      "summary": "Node.js bootstrap and bounded Agent Chat round-trip."
     }
   ],
   "checks": [
@@ -46,37 +41,32 @@
     {
       "name": "Hub test suite",
       "status": "passed",
-      "detail": "All four tests passed."
+      "detail": "All eight tests passed."
     },
     {
-      "name": "Hub self-test",
-      "status": "passed",
-      "detail": "hobbyka-hub self-test: ok"
-    },
-    {
-      "name": "Syntax check",
+      "name": "Hub syntax check",
       "status": "passed",
       "detail": "node --check completed successfully."
     },
     {
-      "name": "Plugin validation",
+      "name": "Diff whitespace check",
       "status": "passed",
-      "detail": "Codex plugin validation passed."
+      "detail": "git diff --check completed successfully."
     }
   ],
   "reproduce": [
-    "node --test plugins/hobbyka-hub/tests/windows-codex-command.test.mjs",
+    "node --test plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs",
     "node --test plugins/hobbyka-hub/tests/*.test.mjs",
-    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test",
-    "node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs"
+    "node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
+    "git diff --check"
   ],
   "limitations": [
-    "No reachable Windows runner was available; Valera must repeat the original install command with the released Hub version."
+    "No reachable Windows runner was available; the actual delivery and reply can be proven only when Elvira runs the public script."
   ],
   "residual_risks": [
-    "A custom HOBBYKA_CODEX_COMMAND containing cmd metacharacters is rejected instead of executed."
+    "winget may request Windows elevation; if the newly installed node.exe is not visible until a new PowerShell opens, the script stops before changing Hub or Agent Chat."
   ],
   "notes": [
-    "No dependency was added and shell:true is intentionally not used because Node.js DEP0190 warns that its args array is not escaped."
+    "No dependency was added. The test sends only one message and refuses a blind retry when delivery outcome is unknown."
   ]
 }
