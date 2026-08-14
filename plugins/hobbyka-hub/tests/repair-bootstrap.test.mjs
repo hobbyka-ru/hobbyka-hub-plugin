@@ -30,3 +30,15 @@ test("macOS repair script preserves Agent Chat state and verifies the real servi
   assert.match(repair, /state_hash/);
   assert.doesNotMatch(repair, /rm -rf [^"']*(?:AgentChat|\.codex)/);
 });
+
+test("Windows repair script preserves Agent Chat state and verifies scheduled tasks", async () => {
+  const repair = await readFile(new URL("../../../scripts/repair-elvira-windows.ps1", import.meta.url), "utf8");
+  assert.match(repair, /hobbyka-hub\.mjs.*repair/s);
+  assert.match(repair, /install.*hobbyka-agent-chat/s);
+  assert.match(repair, /"inbox", "status"/);
+  assert.match(repair, /Hobbyka Hub Auto Update/);
+  assert.match(repair, /Hobbyka Agent Chat Updater/);
+  assert.match(repair, /Get-FileHash/);
+  assert.match(repair, /target_thread_id/);
+  assert.doesNotMatch(repair, /Remove-Item[^\n]*(?:AgentChat|\.codex)/i);
+});
