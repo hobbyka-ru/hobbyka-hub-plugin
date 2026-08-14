@@ -5,27 +5,27 @@
 > The same reproducer changed from failing to passing and broader checks passed.
 
 **Project:** Hobbyka Hub  
-**Bug:** Windows Hub cannot start the Codex cmd shim  
-**Environment:** Reported on Windows with Hobbyka Hub 0.4.26 and Node.js 24; focused regression verified on macOS because no reachable Windows runner was available.  
-**Generated:** 2026-08-13
+**Bug:** Windows repair requires Node and does not verify Agent Chat round-trip
+**Environment:** Windows target; deterministic script-contract regression run on macOS because no reachable Windows runner was available.
+**Generated:** 2026-08-14
 
 ## Original report
 
-Hobbyka Hub 0.4.26 downloads hobbyka-agent-chat on Windows but fails before registration with spawnSync codex.cmd EINVAL; selecting a protected executable directly produces EPERM.
+Elvira's Windows repair must install Node.js if it is absent, send one test message to @ardanila, and finish only after confirming the matching reply.
 
 | Contract | Expected | Actual |
 |---|---|---|
-| Observed behavior | Hub invokes the installed Codex CLI, registers hobbyka-agent-chat@hobbyka-hub, and confirms installation. | Node.js 24 rejects direct execution of codex.cmd with EINVAL, so installation exits before registration and confirmation. |
+| Observed behavior | The repair installs official Node.js LTS when needed, preserves Agent Chat data and Inbox routing, sends one nonce-bearing message to @ardanila, and confirms a reply from that exact profile with the same nonce. | The previous repair stopped when Node.js was absent and declared success after local service checks without testing message delivery or a reply. |
 
 ## Minimal reproduction
 
-A focused test requires .cmd shims to be routed through cmd.exe without shell:true, verifies quoting, rejects cmd metacharacters, and keeps marketplace paths out of the command string.
+A focused test inspects the public Windows repair and requires the winget Node.js LTS installation plus find, open, send, read, and mark-read commands for the exact @ardanila conversation.
 
-**Confirming signal:** The focused test exits 1 because the shared process helper directly passes codex.cmd to spawnSync and has no safe Windows command path.
+**Confirming signal:** The focused test exits 1 because the previous script contains neither the winget Node.js installation nor the Agent Chat round-trip.
 
 ### Reproduction files
 
-- [windows-codex-command.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7) — Focused Windows cmd invocation and injection regression test.
+- [repair-bootstrap.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-roundtrip-20260814/plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs:34) — Focused Windows repair contract regression.
 
 ## Red to green evidence
 
@@ -33,110 +33,144 @@ A focused test requires .cmd shims to be routed through cmd.exe without shell:tr
 |---|---:|---:|
 | Exit code | 1 | 0 |
 | Timed out | False | False |
-| Duration | 63.711 ms | 62.008 ms |
+| Duration | 60.613 ms | 56.755 ms |
 | Same command | — | True |
 | Broader suite | — | passed |
 
 ### Before — failing evidence
 
 ```text
-✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (3.86725ms)
-ℹ tests 1
+✔ repair bootstraps the managed marketplace before updating legacy plugins (0.362333ms)
+✔ normal install immediately reconciles legacy Hobbyka plugins (0.132042ms)
+✔ macOS repair script preserves Agent Chat state and verifies the real services (5.409958ms)
+✖ Windows repair script preserves Agent Chat state and verifies scheduled tasks (0.986208ms)
+ℹ tests 4
 ℹ suites 0
-ℹ pass 0
+ℹ pass 3
 ℹ fail 1
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 36.86975
+ℹ duration_ms 37.602542
 
 ✖ failing tests:
 
-test at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7:1
-✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (3.86725ms)
-  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+test at plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs:34:1
+✖ Windows repair script preserves Agent Chat state and verifies scheduled tasks (0.986208ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /winget\.exe.*OpenJS\.NodeJS\.LTS/s. Input:
   
-    assert.ok(definition)
-  
-      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:9:10)
-      at Test.runInAsyncScope (node:async_hooks:214:14)
-      at Test.run (node:internal/test_runner/test:1106:25)
-      at Test.start (node:internal/test_runner/test:1003:17)
-      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
-    generatedMessage: true,
-    code: 'ERR_ASSERTION',
-    actual: undefined,
-    expected: true,
-    operator: '==',
-    diff: 'simple'
-  }
+  '$ErrorActionPreference = "Stop"\n' +
+    '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)\n' +
+    '\n' +
+    'function Fail([string]$Message) { throw "ОШИБКА: $Message" }\n' +
+    'function Find-Command([string[]]$Names, [string[]]$Candidates) {\n' +
+    '  foreach ($name in $Names) {\n' +
+    '    $command = Get-Command $name -ErrorAction SilentlyContinue | Select-Object -First 1\n' +
+    '    if ($command) { return $command.Source }\n' +
+    '  }\n' +
+    '  foreach ($candidate in $Candidates) { if ($candidate -and (Test-Path -LiteralPath $candidate)) { return $candidate } }\n' +
+    '  return $null\n' +
+    '}\n' +
+    'function Run([string]$File, [string[]]$Arguments) {\n' +
+    '  & $File @Arguments\n' +
+    '  if ($LASTEXITCODE -ne 0) { Fail "команда завершилась с кодом $LASTEXITCODEˋ: $File" }\n' +
+    '}\n' +
+    'function Read-JsonCommand([string]$File, [string[]]$Arguments) {\n' +
+    '  $output = & $File @Arguments | Out-String\n' +
+    '  if ($LASTEXITCODE -ne 0) { Fail "команда проверки завершилась с кодом $LASTEXITCODEˋ: $File" }\n' +
+    '  return $output | ConvertFrom-Json\n' +
+    '}\n' +
+    '\n' +
+    'if ($env:OS -ne "Windows_NT") { Fail "скрипт предназначен для Windows" }\n' +
+    '$codex = Find-Command @("codex.cmd", "codex.exe", "codex") @()\n' +
+    '$node = Find-Command @("node.exe", "node") @(\n' +
+    '  (Join-Path $env:ProgramFiles "nodejs\\node.exe"),\n' +
+    '  (Join-Path $env:LOCALAPPDATA "Programs\\nodejs\\node.exe")\n' +
+    ')\n' +
+    'if (-not $codex) { Fail "не найден Codex" }\n' +
+    'if (-not $node) { Fail "не найден Node.js" }\n' +
+    '\n' +
+    '$work = Join-Path ([IO.Path]::GetTempPath()) ("hobbyka-repair-" + [guid]::NewGuid().ToString("N"))\n' +
+    'New-Item -ItemType Directory -Path $work | Out-Null\n' +
+    'try {\n' +
+    '  $state = Join-Path $env:APPDATA "Hobbyka\\AgentChat\\session.json"\n' +
+    '  $stateHash = if (Test-Path -LiteralPath $state) { (Get-FileHash -Algorithm SHA256 -LiteralPath $state).Hash } else { $null }\n' +
+    '  $oldTarget = $null\n' +
+    '  $oldService = Join-Path $env:LOCALAPPDATA "Hobbyka\\AgentChat\\bin\\hchat-router.exe"\n' +
+    '  if (Test-Path -LiteralPath $oldService) {\n' +
+    '    try { $oldTar
+... [output truncated] ...
+ub = Join-Path $managed "hobbyka-hub\\bin\\hobbyka-hub.mjs"\n  if (-not (Test-Path -LiteralPath $hub)) { Fail "Hobbyka Hub не зарегистрирован в Codex" }\n\n  Write-Host "3/4 Переустанавливаю актуальный Agent Chat без удаления его данных…"\n  Run $node @($hub, "install", "hobbyka-agent-chat")\n  Run $node @($hub, "self-test")\n\n  $hchat = Join-Path $managed "hobbyka-agent-chat\\scripts\\hchat.ps1"\n  if (-not (Test-Path -LiteralPath $hchat)) { Fail "Agent Chat не установлен" }\n  $powershell = (Get-Command powershell.exe -ErrorAction Stop).Source\n  $prefix = @("-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", $hchat)\n  $version = Read-JsonCommand $powershell ($prefix + @("version"))\n  $status = Read-JsonCommand $powershell ($prefix + @("inbox", "status"))\n  $plugins = Read-JsonCommand $codex @("plugin", "list", "--json")\n\n  Write-Host "4/4 Проверяю версии, Inbox и фоновые задачи…"\n  if ([version]($version.result.version) -lt [version]"0.6.11") { Fail "Agent Chat остался на версии $($version.result.version)" }\n  if (-not $status.result.route.target_thread_id) { Fail "Inbox не привязан к задаче Codex" }\n  if (-not $status.result.router.installed -or -not $status.result.router.running) { Fail "Router Agent Chat не работает" }\n  if (-not $status.result.router.updater_installed) { Fail "обновлятор Hobbyka Hub не установлен" }\n  if ($oldTarget -and $oldTarget -ne $status.result.route.target_thread_id) { Fail "привязка Inbox изменилась" }\n\n  foreach ($required in @(\n    [pscustomobject]@{ Name = "hobbyka-hub"; Minimum = "0.4.29" },\n    [pscustomobject]@{ Name = "hobbyka-agent-chat"; Minimum = "0.6.11" }\n  )) {\n    $plugin = $plugins.installed | Where-Object { $_.name -eq $required.Name -and $_.installed -and $_.marketplaceName -eq "hobbyka-hub" } | Select-Object -First 1\n    if (-not $plugin) { Fail "$($required.Name) не установлен из управляемого Hobbyka Hub" }\n    if ([version]($plugin.version) -lt [version]($required.Minimum)) { Fail "$($required.Name) $($plugin.version) старее $($required.Minimum)" }\n  }\n\n  if ($stateHash) {\n    if (-not (Test-Path -LiteralPath $state)) { Fail "локальная сессия Agent Chat исчезла" }\n    if ((Get-FileHash -Algorithm SHA256 -LiteralPath $state).Hash -ne $stateHash) { Fail "локальная сессия Agent Chat изменилась" }\n  }\n  & schtasks.exe /Query /TN "Hobbyka Hub Auto Update" *> $null\n  if ($LASTEXITCODE -ne 0) { Fail "задача автообновления Hobbyka Hub не зарегистрирована" }\n  & schtasks.exe /Query /TN "Hobbyka Agent Chat Updater" *> $null\n  if ($LASTEXITCODE -eq 0) { Fail "устаревший обновлятор Agent Chat всё ещё зарегистрирован" }\n\n  Write-Host "ˋnГОТОВО: Hobbyka Hub и Agent Chat переустановлены и обновлены; данные и Inbox сохранены; Router и единый автообновлятор работают."\n} finally {\n  Remove-Item -LiteralPath $work -Recurse -Force -ErrorAction SilentlyContinue\n}\n',
+    expected: /winget\.exe.*OpenJS\.NodeJS\.LTS/s,
+    operator: 'mat
 ```
 
 ### After — fixed evidence
 
 ```text
-✔ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (0.666375ms)
-ℹ tests 1
+✔ repair bootstraps the managed marketplace before updating legacy plugins (0.331375ms)
+✔ normal install immediately reconciles legacy Hobbyka plugins (0.060834ms)
+✔ macOS repair script preserves Agent Chat state and verifies the real services (5.840292ms)
+✔ Windows repair script preserves Agent Chat state and verifies scheduled tasks (0.759042ms)
+ℹ tests 4
 ℹ suites 0
-ℹ pass 1
+ℹ pass 4
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 35.481833
+ℹ duration_ms 35.801042
 ```
 
 ## Root cause
 
-Windows .cmd files are shell scripts rather than directly executable programs. Hub passed codex.cmd to spawnSync without cmd.exe, which Node.js documents as unsupported on Windows.
+The repair treated Node.js as a prerequisite and ended after local health checks; it had no end-to-end communication acceptance check.
 
 ## Applied fix
 
-Route only Windows .cmd and .bat executables through cmd.exe /d /s /c with explicit quoting, metacharacter rejection, hidden execution, and verbatim arguments; keep all native executables on direct spawnSync.
+Install official Node.js LTS through winget when missing, then use the installed hchat binary to open the exact @ardanila profile, send one nonce-bearing test message, wait at most five minutes for the matching reply, and mark it read.
 
-**Why this is causal:** The corrected shared helper handles every Codex CLI call and removes the direct .cmd execution that produced EINVAL without enabling Node's unsafe shell:true argument concatenation.
+**Why this is causal:** The changed script now supplies its missing runtime prerequisite and makes the requested remote round-trip the condition for success.
 
 ### Production fix files
 
-- [hobbyka-hub.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/bin/hobbyka-hub.mjs:422) — Safe .cmd/.bat execution in the shared process helper.
-- [plugin.json](/Users/ardanila/code/hobbyka-ru/_worktrees/fix-windows-codex-cmd-20260813/plugins/hobbyka-hub/.codex-plugin/plugin.json:3) — Release version 0.4.28.
+- [repair-elvira-windows.ps1](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-roundtrip-20260814/scripts/repair-elvira-windows.ps1:34) — Node.js bootstrap and bounded Agent Chat round-trip.
 
 ## Verification
 
 | Check | Status | Evidence |
 |---|---|---|
 | Focused regression | ✅ passed | The same command changed from exit 1 to exit 0. |
-| Hub test suite | ✅ passed | All four tests passed. |
-| Hub self-test | ✅ passed | hobbyka-hub self-test: ok |
-| Syntax check | ✅ passed | node --check completed successfully. |
-| Plugin validation | ✅ passed | Codex plugin validation passed. |
+| Hub test suite | ✅ passed | All eight tests passed. |
+| Hub syntax check | ✅ passed | node --check completed successfully. |
+| Diff whitespace check | ✅ passed | git diff --check completed successfully. |
 
 ## Reproduce
 
 ```bash
-node --test plugins/hobbyka-hub/tests/windows-codex-command.test.mjs
+node --test plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs
 ```
 ```bash
 node --test plugins/hobbyka-hub/tests/*.test.mjs
 ```
 ```bash
-node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test
+node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs
 ```
 ```bash
-node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs
+git diff --check
 ```
 
 ## Limitations
 
-- No reachable Windows runner was available; Valera must repeat the original install command with the released Hub version.
+- No reachable Windows runner was available; the actual delivery and reply can be proven only when Elvira runs the public script.
 
 ## Residual risks
 
-- A custom HOBBYKA_CODEX_COMMAND containing cmd metacharacters is rejected instead of executed.
+- winget may request Windows elevation; if the newly installed node.exe is not visible until a new PowerShell opens, the script stops before changing Hub or Agent Chat.
 
 ## Notes
 
-- No dependency was added and shell:true is intentionally not used because Node.js DEP0190 warns that its args array is not escaped.
+- No dependency was added. The test sends only one message and refuses a blind retry when delivery outcome is unknown.
 
 ---
 

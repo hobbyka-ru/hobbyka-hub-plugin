@@ -40,5 +40,11 @@ test("Windows repair script preserves Agent Chat state and verifies scheduled ta
   assert.match(repair, /Hobbyka Agent Chat Updater/);
   assert.match(repair, /Get-FileHash/);
   assert.match(repair, /target_thread_id/);
+  assert.match(repair, /winget\.exe.*OpenJS\.NodeJS\.LTS/s);
+  assert.match(repair, /find.*colleague.*ardanila/s);
+  assert.match(repair, /\$userRef = "user:.*@\("open", \$userRef, "--confirm"\)/s);
+  assert.match(repair, /\$conversationRef = "conversation:.*@\("send", \$conversationRef, "--stdin", "--confirm"\)/s);
+  assert.match(repair, /@\("read", \$conversationRef\)/);
+  assert.match(repair, /@\("mark-read", "message:\$\(\$reply\.id\)", "--confirm"\)/);
   assert.doesNotMatch(repair, /Remove-Item[^\n]*(?:AgentChat|\.codex)/i);
 });
