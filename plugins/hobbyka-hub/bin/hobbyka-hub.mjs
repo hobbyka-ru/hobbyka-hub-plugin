@@ -212,7 +212,7 @@ async function updatePublicHub(quiet) {
   try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
   let latest;
-  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
+  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/refs/heads/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
   const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
   const response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" });
