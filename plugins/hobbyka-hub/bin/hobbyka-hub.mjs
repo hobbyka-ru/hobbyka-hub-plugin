@@ -21,14 +21,15 @@ const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1")
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
-else if (command === "install") await install(args[0]);
+else if (command === "install") await installAndReconcile(args[0]);
 else if (command === "publish") await publish(args[0]);
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
 else if (command === "update") await update(args.includes("--quiet"));
+else if (command === "repair") await repair();
 else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();
 else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable");
 
 async function submitReport(args, kind) {
   const parsed = parseReportArgs(args);
@@ -163,6 +164,20 @@ async function install(slug, { update = false, quiet = false } = {}) {
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+async function installAndReconcile(slug) {
+  await install(slug);
+  await update(true);
+}
+
+async function repair() {
+  const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
+  await updatePublicHub(false);
+  await configureMarketplace(codexRoot);
+  await enableAutoupdate(true, join(codexRoot, "plugins", "hobbyka-hub"));
+  await update(false);
+  console.log("Hobbyka Hub восстановлен, старые установки согласованы, автообновление включено.");
 }
 
 async function update(quiet = false) {
