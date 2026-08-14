@@ -17,3 +17,16 @@ test("Windows Codex cmd shim uses cmd.exe without unsafe shell arguments", () =>
   assert.match(source, /run\(codexCommand\(\), \["plugin", "marketplace", "add", "\."\], codexRoot\)/);
   assert.doesNotMatch(source, /spawnSync\(executable, args, \{[^\n]+shell:\s*true/);
 });
+
+test("Windows Task Scheduler uses the guarded command shell path", () => {
+  const definition = source.match(/function windowsShellRequired\(executable, os = platform\(\)\) \{[^\n]+\}/)?.[0];
+  assert.ok(definition);
+  const windowsShellRequired = Function("platform", "basename", `${definition}; return windowsShellRequired;`)(
+    () => "darwin",
+    (path) => path.split(/[\\/]/).at(-1),
+  );
+  assert.equal(windowsShellRequired("schtasks.exe", "win32"), true);
+  assert.equal(windowsShellRequired("C:\\Windows\\System32\\schtasks.exe", "win32"), true);
+  assert.equal(windowsShellRequired("tar.exe", "win32"), false);
+  assert.equal(windowsShellRequired("schtasks.exe", "darwin"), false);
+});

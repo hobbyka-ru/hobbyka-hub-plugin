@@ -48,3 +48,8 @@ test("Windows repair script preserves Agent Chat state and verifies scheduled ta
   assert.match(repair, /@\("mark-read", "message:\$\(\$reply\.id\)", "--confirm"\)/);
   assert.doesNotMatch(repair, /Remove-Item[^\n]*(?:AgentChat|\.codex)/i);
 });
+
+test("self-test skips only Unix executable bits on Windows", () => {
+  assert.match(source, /if \(platform\(\) !== "win32"\) \{[\s\S]*?restoreExecutableScripts\(fixture\)[\s\S]*?executable script restoration failed[\s\S]*?\}/);
+  assert.match(source, /await runPostUpdateHook\(fixture, marker\)/);
+});
