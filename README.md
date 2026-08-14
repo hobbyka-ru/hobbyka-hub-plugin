@@ -14,3 +14,9 @@ codex plugin add hobbyka-hub@hobbyka-hub
 ```sh
 sh scripts/repair-elvira-macos.sh
 ```
+
+На Windows запустите PowerShell:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\repair-elvira-windows.ps1
+```
