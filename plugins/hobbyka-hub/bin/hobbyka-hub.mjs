@@ -81,7 +81,7 @@ async function submitReport(args, kind) {
     let attachment;
     try { attachment = await response.json(); }
     catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
-    if (!validUUID(attachment.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
+    if (!validUUID(attachment?.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
     attachmentIDs.push(attachment.id);
   }
   let response;
