@@ -43,7 +43,7 @@ async function submitReport(args, kind) {
       process.stdin.setEncoding("utf8");
       for await (const chunk of process.stdin) {
         body += chunk;
-        if (Buffer.byteLength(body) > 32768) break;
+        if (Buffer.byteLength(body) > 32768) return jsonFailure("failed", "invalid_report", "Нужен текст до 32 КБ.", 2);
       }
     }
     body = body.trim();

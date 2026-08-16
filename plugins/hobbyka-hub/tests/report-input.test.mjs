@@ -25,3 +25,21 @@ test("reads Cyrillic report text from a UTF-8 body file", () => {
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("rejects stdin larger than 32 KB instead of silently truncating it", () => {
+  const oversized = "A".repeat(32768) + " ";
+  assert.throws(
+    () => execFileSync(process.execPath, [join(root, "bin", "hobbyka-hub.mjs"), "report-bug", "--stdin"], {
+      encoding: "utf8",
+      input: oversized,
+      env: { ...process.env, HOBBYKA_HUB_CA_READY: "1" },
+    }),
+    (error) => {
+      assert.equal(error.status, 2);
+      const out = JSON.parse(error.stdout);
+      assert.equal(out.status, "failed");
+      assert.equal(out.result.code, "invalid_report");
+      return true;
+    },
+  );
+});
