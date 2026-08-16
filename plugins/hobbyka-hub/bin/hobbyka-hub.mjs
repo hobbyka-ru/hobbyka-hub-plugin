@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, chmod, copyFile, cp, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, platform, tmpdir } from "node:os";
@@ -56,10 +56,12 @@ async function submitReport(args, kind) {
     if (!metadata.isFile() || metadata.size < 1 || metadata.size > 100 * 1024 * 1024) return jsonFailure("failed", "invalid_file", `${path}: нужен файл до 100 МБ.`, 2);
     files.push({ path: resolve(path), name: basename(path), size_bytes: metadata.size });
   }
-  const operation = parsed.operation || randomUUID();
+  const body_sha256 = createHash("sha256").update(body).digest("hex");
+  const operation = reportOperationID(kind, body_sha256, files);
+  if (parsed.operation && parsed.operation !== operation) return jsonFailure("failed", "invalid_operation", "Показанный --operation не соответствует содержимому отчёта. Повторите preview и подтвердите тот же текст и файлы.", 2);
   const uploadOperations = files.map((_, index) => derivedOperationID(operation, index));
   const refs = [{ type: "operation", id: operation, ref: `operation:${operation}` }, ...uploadOperations.map((id) => ({ type: "operation", id, ref: `operation:${id}` }))];
-  const details = { body_sha256: createHash("sha256").update(body).digest("hex"), body_bytes: Buffer.byteLength(body), files: files.map((file, index) => ({ name: file.name, size_bytes: file.size_bytes, operation_id: uploadOperations[index] })), operation_id: operation };
+  const details = { body_sha256, body_bytes: Buffer.byteLength(body), files: files.map((file, index) => ({ name: file.name, size_bytes: file.size_bytes, operation_id: uploadOperations[index] })), operation_id: operation };
   const action = reportAction(kind);
   if (!parsed.confirm) {
     return printJSON({ status: "ok", refs, provenance: localProvenance(), effects: { state: "planned", action, server: agentChat, required_flags: ["--confirm", `--operation ${operation}`], ...details } }, 0);
@@ -113,13 +115,15 @@ function parseReportArgs(args) {
   return result;
 }
 
-function derivedOperationID(operation, index) {
-  const value = createHash("sha256").update(`${operation}:attachment:${index}`).digest().subarray(0, 16);
+function hashUUID(input) {
+  const value = createHash("sha256").update(input).digest().subarray(0, 16);
   value[6] = (value[6] & 0x0f) | 0x50;
   value[8] = (value[8] & 0x3f) | 0x80;
   const hex = value.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+function derivedOperationID(operation, index) { return hashUUID(`${operation}:attachment:${index}`); }
+function reportOperationID(kind, body_sha256, files) { return hashUUID(JSON.stringify({ kind, body_sha256, files: files.map(({ name, size_bytes }) => ({ name, size_bytes })) })); }
 
 function validUUID(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? ""); }
 function reportAction(kind) { return kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug"; }
