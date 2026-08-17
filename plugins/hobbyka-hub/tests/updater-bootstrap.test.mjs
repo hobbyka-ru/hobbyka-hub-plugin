@@ -53,6 +53,9 @@ esac
 `, { mode: 0o755 });
     await writeFile(launchctl, `#!/bin/sh
 printf '%s\\n' "$*" >> "$CR334_LAUNCHCTL_TRACE"
+case "$1" in
+  print) exit 1 ;;
+esac
 `, { mode: 0o755 });
 
     const result = await new Promise((resolve) => {
