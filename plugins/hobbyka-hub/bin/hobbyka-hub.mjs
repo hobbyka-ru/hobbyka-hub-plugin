@@ -284,9 +284,10 @@ async function propose(value, submit, destination) {
     await saveVerified(response, archive);
     const entries = listArchive(archive).trim().split(/\r?\n/).filter(Boolean);
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В архиве найден небезопасный путь.");
-    await mkdir(target, { recursive: false });
-    extractArchive(archive, target);
-    await writeFile(join(target, ".hobbyka-proposal.json"), JSON.stringify({ slug, baseCommit }, null, 2));
+    await stageDirectory(target, async (staging) => {
+      extractArchive(archive, staging);
+      await writeFile(join(staging, ".hobbyka-proposal.json"), JSON.stringify({ slug, baseCommit }, null, 2));
+    });
     console.log(`Исходники ${slug} подготовлены: ${target}\nПосле изменений: hobbyka-hub propose "${target}" --submit`);
   } finally { await rm(temp, { recursive: true, force: true }); }
 }
@@ -435,9 +436,14 @@ async function configureMarketplace(codexRoot, activeRoots = {}) {
 async function stagePlugin(codexRoot, slug, populate) {
   const versionsRoot = join(codexRoot, "plugins", ".hobbyka-versions");
   const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const staging = join(versionsRoot, `.staging-${slug}-${suffix}`);
   const published = join(versionsRoot, `${slug}-${suffix}`);
-  await mkdir(staging, { recursive: true });
+  await mkdir(versionsRoot, { recursive: true });
+  return stageDirectory(published, populate);
+}
+
+async function stageDirectory(target, populate) {
+  const published = target;
+  const staging = await mkdtemp(join(dirname(published), `.${basename(published)}.staging-`));
   try {
     await populate(staging);
     await rename(staging, published);
