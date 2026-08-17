@@ -136,7 +136,7 @@ function printJSON(value, exitCode) { console.log(JSON.stringify(value)); proces
 async function install(slug, { update = false, quiet = false } = {}) {
   if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");
   const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}&target=${platformTarget()}`, undefined, quiet);
-  if (!response) return;
+  if (!response) return false;
   if (!response.ok) fail(await response.text());
 
   const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
@@ -159,10 +159,11 @@ async function install(slug, { update = false, quiet = false } = {}) {
     const downloadId = response.headers.get("x-hobbyka-download-id");
     if (!downloadId) fail("Hub не вернул идентификатор загрузки.");
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) }, quiet);
-    if (!confirmation) return;
+    if (!confirmation) return false;
     if (!confirmation.ok) fail(`Плагин установлен, но Hub не подтвердил регистрацию: ${await confirmation.text()}`);
     if (!update) await enableAutoupdate(true);
     if (!quiet) console.log(`Плагин ${slug} ${update ? "обновлён" : "установлен"} и подтверждён в Hub.`);
+    return true;
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
@@ -177,8 +178,8 @@ async function update(quiet = false) {
   const remote = (await response.json()).plugins;
   let allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   for (const slug of legacySlugs(allInstalled, remote)) {
-    await install(slug, { update: true, quiet });
-    run(codexCommand(), ["plugin", "remove", `${slug}@hobbyka`]);
+    const installed = await install(slug, { update: true, quiet });
+    if (installed) run(codexCommand(), ["plugin", "remove", `${slug}@hobbyka`]);
   }
   allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   if (!allInstalled.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka")) {
