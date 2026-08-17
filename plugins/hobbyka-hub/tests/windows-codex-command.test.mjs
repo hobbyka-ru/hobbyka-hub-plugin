@@ -30,3 +30,21 @@ test("Windows Task Scheduler uses the guarded command shell path", () => {
   assert.equal(windowsShellRequired("tar.exe", "win32"), false);
   assert.equal(windowsShellRequired("schtasks.exe", "darwin"), false);
 });
+
+test("Windows auto-update task safely carries a quoted launcher path", () => {
+  const definition = source.match(/function windowsTaskAction\(launcher\) \{[^\n]+\}/)?.[0];
+  assert.ok(definition);
+  const windowsTaskAction = Function("Buffer", `${definition}; return windowsTaskAction;`)(Buffer);
+  const action = windowsTaskAction("C:\\Users\\O'Brien Name\\.codex\\hobbyka-hub-updater\\update-hidden.vbs");
+  const encoded = action.split(" ").at(-1);
+
+  assert.equal(
+    Buffer.from(encoded, "base64").toString("utf16le"),
+    "& 'wscript.exe' 'C:\\Users\\O''Brien Name\\.codex\\hobbyka-hub-updater\\update-hidden.vbs'",
+  );
+  assert.doesNotThrow(() => {
+    const commandDefinition = source.match(/function windowsCommand\(executable, args\) \{[^\n]+\}/)?.[0];
+    const windowsCommand = Function("fail", `${commandDefinition}; return windowsCommand;`)((message) => { throw new Error(message); });
+    windowsCommand("schtasks.exe", ["/Create", "/TR", action]);
+  });
+});

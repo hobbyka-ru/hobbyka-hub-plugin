@@ -311,7 +311,7 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
   } else if (platform() === "win32") {
     const launcher = join(dirname(stableScript), "update-hidden.vbs");
     await writeFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
-    run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", `wscript.exe "${launcher}"`]);
+    run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", windowsTaskAction(launcher)]);
   } else if (platform() === "linux") {
     const systemd = linuxSystemd();
     const units = linuxUnits(process.execPath, stableScript, codex);
@@ -432,6 +432,7 @@ function windowsLauncher(node, updater, codex) { const escape = (value) => value
 function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
 function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
 function linuxUnits(node, updater, codex, home = homedir()) { return { service: `[Unit]\nDescription=Update Hobbyka Hub plugins\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nEnvironment=${systemdQuote(`HOBBYKA_CODEX_COMMAND=${codex}`)}\nEnvironment=${systemdQuote(`HOME=${home}`)}\nExecStart=${systemdQuote(node)} ${systemdQuote(updater)} update --quiet\n`, timer: `[Unit]\nDescription=Check Hobbyka Hub plugin updates every 15 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n` }; }
+function windowsTaskAction(launcher) { const script = `& 'wscript.exe' '${String(launcher).replaceAll("'", "''")}'`; return `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`; }
 function windowsCommand(executable, args) { const values = [executable, ...args].map(String); if (values.some((value) => /[\r\n"&|<>^%!]/.test(value))) fail("Команда Windows содержит небезопасный аргумент."); return values.map((value) => `"${value}"`).join(" "); }
 function windowsShellRequired(executable, os = platform()) { return os === "win32" && (/\.(?:cmd|bat)$/i.test(executable) || basename(executable).toLowerCase() === "schtasks.exe"); }
 function spawnProcess(executable, args, options) { if (!windowsShellRequired(executable)) return spawnSync(executable, args, options); const command = `"${windowsCommand(executable, args)}"`; return spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", command], { ...options, windowsHide: true, windowsVerbatimArguments: true }); }
