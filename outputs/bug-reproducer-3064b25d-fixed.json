@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "label": "fixed",
+  "captured_at": "2026-08-17T12:06:55.229606+00:00",
+  "command": [
+    "node",
+    "--test",
+    "plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs"
+  ],
+  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-hub-post-update-cache-20260817",
+  "runtime": "Python 3.9.6 on Darwin arm64",
+  "duration_ms": 59.433,
+  "exit_code": 0,
+  "timed_out": false,
+  "stdout": "\u2714 repair bootstraps the managed marketplace before updating legacy plugins (0.335458ms)\n\u2714 normal install immediately reconciles legacy Hobbyka plugins (0.058042ms)\n\u2714 install completes post-update before Codex snapshots the plugin cache (0.062583ms)\n\u2714 macOS repair script preserves Agent Chat state and verifies the real services (5.958792ms)\n\u2714 Windows repair script preserves Agent Chat state and verifies scheduled tasks (0.6315ms)\n\u2714 self-test skips only Unix executable bits on Windows (0.099583ms)\n\u2714 self-update reads the manifest from the downloaded archive (0.056083ms)\n\u2139 tests 7\n\u2139 suites 0\n\u2139 pass 7\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 37.595125\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "secrets_redacted": true
+}

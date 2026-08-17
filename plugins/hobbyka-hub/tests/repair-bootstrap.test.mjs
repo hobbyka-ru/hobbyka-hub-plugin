@@ -18,6 +18,15 @@ test("normal install immediately reconciles legacy Hobbyka plugins", () => {
   assert.match(dispatch, /installAndReconcile/);
 });
 
+test("install completes post-update before Codex snapshots the plugin cache", () => {
+  const install = source.slice(source.indexOf("async function install("), source.indexOf("async function installAndReconcile("));
+  const hook = install.indexOf("await runPostUpdateHook(pluginRoot)");
+  const marketplace = install.indexOf("await configureMarketplace(codexRoot)");
+  const add = install.indexOf('run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`])');
+
+  assert.ok(hook >= 0 && hook < marketplace && marketplace < add);
+});
+
 test("macOS repair script preserves Agent Chat state and verifies the real services", async () => {
   const scriptURL = new URL("../../../scripts/repair-elvira-macos.sh", import.meta.url);
   const repair = await readFile(scriptURL, "utf8");
