@@ -122,3 +122,77 @@ test("null attachment response becomes a structured invalid_response with refs",
     rmSync(temp, { recursive: true, force: true });
   }
 });
+
+test("canonicalizes UUID case before attachment and report replay", async () => {
+  const temp = mkdtempSync(join(tmpdir(), "hobbyka-uuid-case-"));
+  let httpServer;
+  try {
+    const bodyA = join(temp, "a.md");
+    const bodyB = join(temp, "b.md");
+    const attachment = join(temp, "attach.bin");
+    writeFileSync(bodyA, "Один отчёт", "utf8");
+    writeFileSync(bodyB, "Другой отчёт", "utf8");
+    writeFileSync(attachment, "binary-content", "utf8");
+
+    const attachmentOperations = [];
+    const reportBodies = [];
+    const uploadedByOperation = new Set();
+    const started = await startServer((req, res, body) => {
+      res.setHeader("content-type", "application/json");
+      if (req.url === "/agent/v1/attachments") {
+        const operation = req.headers["x-hobbyka-operation-id"];
+        attachmentOperations.push(operation);
+        const firstUpload = !uploadedByOperation.has(operation);
+        uploadedByOperation.add(operation);
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: firstUpload ? ATTACHMENT_ID : ATTACHMENT_ID.toUpperCase() }));
+        return;
+      }
+      if (req.url === "/agent/v1/bug-reports") {
+        reportBodies.push(JSON.parse(body));
+        res.writeHead(200);
+        res.end(JSON.stringify({ id: reportBodies.length === 1 ? ATTACHMENT_ID : ATTACHMENT_ID.toUpperCase(), kind: "idea" }));
+        return;
+      }
+      res.writeHead(404);
+      res.end(JSON.stringify({ error: "not found" }));
+    });
+    httpServer = started.server;
+    const env = { HOBBYKA_AGENT_CHAT_URL: started.url };
+
+    const preview = JSON.parse((await runCLI(["idea", "--body-file", bodyA, "--file", attachment], { env })).stdout);
+    assert.equal(preview.status, "ok");
+    const operation = preview.effects.operation_id;
+    const upperOperation = operation.toUpperCase();
+
+    const upperPreview = await runCLI(["idea", "--body-file", bodyA, "--file", attachment, "--operation", upperOperation], { env });
+    assert.equal(upperPreview.status, 0, "case-only operation changes must remain valid");
+    const upperPreviewJSON = JSON.parse(upperPreview.stdout);
+    assert.deepEqual(upperPreviewJSON.effects, preview.effects, "same UUID case must keep the report fingerprint and child operation IDs");
+
+    const lowerConfirm = await runCLI(["idea", "--body-file", bodyA, "--file", attachment, "--operation", operation, "--confirm"], { env });
+    assert.equal(lowerConfirm.status, 0);
+    const upperConfirm = await runCLI(["idea", "--body-file", bodyA, "--file", attachment, "--operation", upperOperation, "--confirm"], { env });
+    assert.equal(upperConfirm.status, 0, "uppercase replay must use the same operation");
+    assert.equal(attachmentOperations.length, 2, "both confirmations should reach the idempotent upload boundary");
+    assert.match(attachmentOperations[0], /^[0-9a-f-]+$/, "upload operation must be canonical lowercase UUID");
+    assert.equal(new Set(attachmentOperations).size, 1, "case-only replay must not create a second upload operation");
+    assert.equal(uploadedByOperation.size, 1, "case-only replay must be one logical upload");
+    assert.equal(reportBodies.length, 2, "both confirmations should reach the report boundary");
+    assert.deepEqual(reportBodies[1], reportBodies[0], "case-only replay must keep one report fingerprint");
+    assert.equal(JSON.parse(upperConfirm.stdout).result.id, ATTACHMENT_ID, "response UUIDs must be exposed canonically");
+
+    const distinctPreview = JSON.parse((await runCLI(["idea", "--body-file", bodyB, "--file", attachment], { env })).stdout);
+    assert.notEqual(distinctPreview.effects.operation_id, operation, "distinct report UUIDs must remain distinct");
+    assert.notEqual(distinctPreview.effects.files[0].operation_id, preview.effects.files[0].operation_id, "distinct report UUIDs need distinct child operations");
+
+    const beforeInvalid = started.requests.length;
+    const invalid = await runCLI(["idea", "--body-file", bodyA, "--file", attachment, "--operation", "not-a-uuid", "--confirm"], { env });
+    assert.equal(invalid.status, 2);
+    assert.equal(JSON.parse(invalid.stdout).result.code, "invalid_arguments");
+    assert.equal(started.requests.length, beforeInvalid, "invalid UUID must be rejected before HTTP");
+  } finally {
+    if (httpServer) await closeServer(httpServer);
+    rmSync(temp, { recursive: true, force: true });
+  }
+});

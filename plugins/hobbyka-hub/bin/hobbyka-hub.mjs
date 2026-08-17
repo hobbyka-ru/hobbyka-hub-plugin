@@ -104,8 +104,9 @@ async function submitReport(args, kind) {
     let attachment;
     try { attachment = await response.json(); }
     catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
-    if (!validUUID(attachment?.id)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
-    attachmentIDs.push(attachment.id);
+    const attachmentID = normalizeUUID(attachment?.id);
+    if (!attachmentID) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул UUID вложения.", 6, refs);
+    attachmentIDs.push(attachmentID);
   }
   let response;
   try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, body, attachment_ids: attachmentIDs, operation_id: operation }), signal }); }
@@ -115,6 +116,8 @@ async function submitReport(args, kind) {
   try { report = await response.json(); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!validReport(report, kind)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул запись ожидаемого типа.", 6, refs);
+  const reportID = normalizeUUID(report.id);
+  report = { ...report, id: reportID };
   return printJSON({ status: "ok", result: report, refs: [reportRef(kind, report.id), ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action, ...details } }, 0);
 }
 
@@ -134,7 +137,11 @@ function parseReportArgs(args) {
   }
   if (result.stdin === Boolean(result.bodyFile)) return { ok: false, error: "Нужен ровно один источник текста: --stdin или --body-file PATH." };
   if (result.files.length > 5) return { ok: false, error: "Можно приложить не больше 5 файлов." };
-  if (result.operation && !validUUID(result.operation)) return { ok: false, error: "--operation должен быть UUID." };
+  if (result.operation) {
+    const operation = normalizeUUID(result.operation);
+    if (!operation) return { ok: false, error: "--operation должен быть UUID." };
+    result.operation = operation;
+  }
   return result;
 }
 
@@ -145,10 +152,18 @@ function hashUUID(input) {
   const hex = value.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
-function derivedOperationID(operation, index) { return hashUUID(`${operation}:attachment:${index}`); }
+function derivedOperationID(operation, index) {
+  const canonicalOperation = normalizeUUID(operation);
+  if (!canonicalOperation) throw new Error("operation must be a UUID");
+  return hashUUID(`${canonicalOperation}:attachment:${index}`);
+}
 function reportOperationID(kind, body_sha256, files) { return hashUUID(JSON.stringify({ kind, body_sha256, files: files.map(({ name, size_bytes }) => ({ name, size_bytes })) })); }
 
-function validUUID(value) { return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value ?? ""); }
+function normalizeUUID(value) {
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "";
+  return value.toLowerCase();
+}
+function validUUID(value) { return Boolean(normalizeUUID(value)); }
 function reportAction(kind) { return kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug"; }
 function reportRef(kind, id) { return { type: kind, id, ref: `${kind}:${id}` }; }
 function validReport(report, kind) { return report !== null && typeof report === "object" && validUUID(report.id) && report.kind === kind; }
@@ -593,7 +608,8 @@ function identityError(status, body) { if (status === 403) return "ХАБ не �
 async function selfTest() {
 	const reportOperation = "5d90568b-58d5-481d-8ef1-2d91cd904708";
 	const reportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation, "--confirm"]);
-	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !validUUID(derivedOperationID(reportOperation, 0))) throw new Error("bug report arguments failed");
+	const upperReportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation.toUpperCase(), "--confirm"]);
+	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !upperReportArgs.ok || upperReportArgs.operation !== reportOperation || derivedOperationID(reportOperation.toUpperCase(), 0) !== derivedOperationID(reportOperation, 0) || !validUUID(derivedOperationID(reportOperation, 0)) || normalizeUUID("not-a-uuid") !== "") throw new Error("bug report UUID normalization failed");
 	if (reportAction("bug") !== "report Hobbyka bug" || reportAction("idea") !== "submit Hobbyka idea") throw new Error("typed report preview failed");
 	if (reportRef("idea", reportOperation).ref !== `idea:${reportOperation}` || !validReport({ id: reportOperation, kind: "idea" }, "idea") || !validReport({ id: reportOperation, kind: "bug" }, "bug") || validReport({ id: reportOperation, kind: "bug" }, "idea") || validReport(null, "idea")) throw new Error("typed report response failed");
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
