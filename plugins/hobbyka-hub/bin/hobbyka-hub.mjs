@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { access, chmod, copyFile, cp, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { access, chmod, cp, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, platform, tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
+import { atomicCopyFile, atomicWriteFile, withMarketplaceLock } from "./marketplace-state.mjs";
 
 const script = fileURLToPath(import.meta.url);
 if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
@@ -19,14 +20,15 @@ const [command, ...args] = process.argv.slice(2);
 const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\/$/, "");
 const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\/$/, "");
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
+const marketplaceRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
-else if (command === "install") await install(args[0]);
+else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => install(args[0]));
 else if (command === "publish") await publish(args[0]);
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
-else if (command === "update") await update(args.includes("--quiet"));
-else if (command === "autoupdate" && args[0] === "enable") await enableAutoupdate();
-else if (command === "autoupdate" && args[0] === "disable") await disableAutoupdate();
+else if (command === "update") await withMarketplaceLock(marketplaceRoot, () => update(args.includes("--quiet")));
+else if (command === "autoupdate" && args[0] === "enable") await withMarketplaceLock(marketplaceRoot, () => enableAutoupdate());
+else if (command === "autoupdate" && args[0] === "disable") await withMarketplaceLock(marketplaceRoot, () => disableAutoupdate());
 else if (command === "self-test") await selfTest();
 else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
 
@@ -140,19 +142,19 @@ async function install(slug, { update = false, quiet = false } = {}) {
   if (!response.ok) fail(await response.text());
 
   const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
-  const pluginRoot = join(codexRoot, "plugins", slug);
+  const previousRoot = await activePluginPath(codexRoot, slug);
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-"));
   try {
     const archive = join(temp, `${slug}.zip`);
     await saveVerified(response, archive);
     const entries = listArchive(archive).trim().split(/\r?\n/).filter(Boolean);
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В архиве найден небезопасный путь.");
-    await rm(pluginRoot, { recursive: true, force: true });
-    await mkdir(pluginRoot, { recursive: true });
-    extractArchive(archive, pluginRoot);
-    await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8");
-    await restoreExecutableScripts(pluginRoot);
-    await configureMarketplace(codexRoot);
+    const pluginRoot = await stagePlugin(codexRoot, slug, async (staging) => {
+      extractArchive(archive, staging);
+      await readFile(join(staging, ".codex-plugin", "plugin.json"), "utf8");
+      await restoreExecutableScripts(staging);
+    });
+    await configureMarketplace(codexRoot, { [slug]: pluginRef(pluginRoot) });
     run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
     await runPostUpdateHook(pluginRoot);
@@ -162,6 +164,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     if (!confirmation) return false;
     if (!confirmation.ok) fail(`Плагин установлен, но Hub не подтвердил регистрацию: ${await confirmation.text()}`);
     if (!update) await enableAutoupdate(true);
+    await cleanupPluginRoots(codexRoot, slug, pluginRoot, previousRoot);
     if (!quiet) console.log(`Плагин ${slug} ${update ? "обновлён" : "установлен"} и подтверждён в Hub.`);
     return true;
   } finally {
@@ -170,9 +173,9 @@ async function install(slug, { update = false, quiet = false } = {}) {
 }
 
 async function update(quiet = false) {
+  const codexRoot = marketplaceRoot;
   await updatePublicHub(quiet);
-  let response;
-  response = await hubFetch(`${base}/api/plugins`, undefined, quiet);
+  const response = await hubFetch(`${base}/api/plugins`, undefined, quiet);
   if (!response) return;
   if (!response.ok) { if (quiet) return; fail(await response.text()); }
   const remote = (await response.json()).plugins;
@@ -191,13 +194,13 @@ async function update(quiet = false) {
     .map((plugin) => ({ slug: plugin.name, version: plugin.version }));
   const pending = installed.filter((local) => remote.some((plugin) => plugin.slug === local.slug && plugin.version !== local.version)).sort((left, right) => left.slug === "hobbyka-hub" ? 1 : right.slug === "hobbyka-hub" ? -1 : left.slug.localeCompare(right.slug));
   for (const plugin of pending) await install(plugin.slug, { update: true, quiet });
-  for (const plugin of installed.filter((local) => !pending.some((plugin) => plugin.slug === local.slug))) await runPostUpdateHook(join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", plugin.slug));
+  for (const plugin of installed.filter((local) => !pending.some((pendingPlugin) => pendingPlugin.slug === local.slug))) await runPostUpdateHook(await activePluginPath(codexRoot, plugin.slug));
   if (!quiet) console.log(pending.length ? `Обновлено плагинов: ${pending.length}.` : "Установленные плагины из ХАБа уже актуальны.");
 }
 
 async function updatePublicHub(quiet) {
-  const pluginRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace", "plugins", "hobbyka-hub");
-  let currentRoot = pluginRoot;
+  const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
+  let currentRoot = await activePluginPath(codexRoot, "hobbyka-hub");
   try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
   let latest;
@@ -215,11 +218,11 @@ async function updatePublicHub(quiet) {
     extractArchive(archive, temp);
     const source = join(temp, entries[0].split(/[\\/]/)[0], "plugins", "hobbyka-hub");
     await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8");
-    await rm(pluginRoot, { recursive: true, force: true });
-    await cp(source, pluginRoot, { recursive: true });
-    await writeMarketplace(dirname(dirname(pluginRoot)));
+    const pluginRoot = await stagePlugin(codexRoot, "hobbyka-hub", (staging) => cp(source, staging, { recursive: true }));
+    await writeMarketplace(codexRoot, { "hobbyka-hub": pluginRef(pluginRoot) });
     run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
     await enableAutoupdate(true, pluginRoot);
+    await cleanupPluginRoots(codexRoot, "hobbyka-hub", pluginRoot, currentRoot);
     if (!quiet) console.log(`Hobbyka Hub обновлён до ${latest.version}.`);
     return true;
   } finally { await rm(temp, { recursive: true, force: true }); }
@@ -294,21 +297,19 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
   const codex = resolveCodexCommand();
   if (platform() === "darwin") {
     const plist = join(homedir(), "Library", "LaunchAgents", "ru.hobbyka.hub-updater.plist");
-    await mkdir(dirname(plist), { recursive: true });
-    await writeFile(plist, macPlist(process.execPath, stableScript, codex));
+    await atomicWriteFile(plist, macPlist(process.execPath, stableScript, codex));
     const domain = `gui/${process.getuid()}`;
     run("launchctl", ["bootout", domain, plist], undefined, true);
     run("launchctl", ["bootstrap", domain, plist]);
   } else if (platform() === "win32") {
     const launcher = join(dirname(stableScript), "update-hidden.vbs");
-    await writeFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
+    await atomicWriteFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
     run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", `wscript.exe "${launcher}"`]);
   } else if (platform() === "linux") {
     const systemd = linuxSystemd();
     const units = linuxUnits(process.execPath, stableScript, codex);
-    await mkdir(systemd.directory, { recursive: true });
-    await writeFile(join(systemd.directory, "hobbyka-hub-updater.service"), units.service);
-    await writeFile(join(systemd.directory, "hobbyka-hub-updater.timer"), units.timer);
+    await atomicWriteFile(join(systemd.directory, "hobbyka-hub-updater.service"), units.service);
+    await atomicWriteFile(join(systemd.directory, "hobbyka-hub-updater.timer"), units.timer);
     run("systemctl", [...systemd.args, "daemon-reload"]);
     run("systemctl", [...systemd.args, "enable", "--now", "hobbyka-hub-updater.timer"]);
   } else fail("Автообновление поддерживается на macOS, Windows и Linux.");
@@ -336,36 +337,90 @@ async function copyUpdater(pluginRoot) {
   await mkdir(join(root, "bin"), { recursive: true });
   await mkdir(join(root, "assets"), { recursive: true });
   await mkdir(join(root, ".codex-plugin"), { recursive: true });
-  await copyFile(join(pluginRoot, "bin", "hobbyka-hub.mjs"), join(root, "bin", "hobbyka-hub.mjs"));
-  await copyFile(join(pluginRoot, "assets", "hobbyka-chat-root.crt"), join(root, "assets", "hobbyka-chat-root.crt"));
-  await copyFile(join(pluginRoot, ".codex-plugin", "plugin.json"), join(root, ".codex-plugin", "plugin.json"));
+  await atomicCopyFile(join(pluginRoot, "bin", "hobbyka-hub.mjs"), join(root, "bin", "hobbyka-hub.mjs"));
+  await atomicCopyFile(join(pluginRoot, "assets", "hobbyka-chat-root.crt"), join(root, "assets", "hobbyka-chat-root.crt"));
+  await atomicCopyFile(join(pluginRoot, ".codex-plugin", "plugin.json"), join(root, ".codex-plugin", "plugin.json"));
   await chmod(join(root, "bin", "hobbyka-hub.mjs"), 0o755);
   return join(root, "bin", "hobbyka-hub.mjs");
 }
 
-async function writeMarketplace(codexRoot) {
-  const names = [];
-  for (const name of await directories(join(codexRoot, "plugins"))) {
-    try { await access(join(codexRoot, "plugins", name, ".codex-plugin", "plugin.json")); names.push(name); } catch { /* skip */ }
+async function writeMarketplace(codexRoot, activeRoots = {}) {
+  const entries = new Map();
+  let previous = [];
+  try { previous = JSON.parse(await readFile(join(codexRoot, ".agents", "plugins", "marketplace.json"), "utf8")).plugins ?? []; } catch { /* recover from a missing or interrupted legacy file */ }
+  for (const entry of previous) {
+    const name = entry?.name;
+    const sourcePath = entry?.source?.path;
+    if (typeof name !== "string" || typeof sourcePath !== "string") continue;
+    if (await hasPluginManifest(resolve(codexRoot, sourcePath))) entries.set(name, sourcePath);
   }
+  for (const name of await directories(join(codexRoot, "plugins"))) {
+    if (name.startsWith(".")) continue;
+    const sourcePath = `./plugins/${name}`;
+    if (await hasPluginManifest(join(codexRoot, "plugins", name)) && !entries.has(name)) entries.set(name, sourcePath);
+  }
+  for (const [name, sourcePath] of Object.entries(activeRoots)) entries.set(name, sourcePath);
   await mkdir(join(codexRoot, ".agents", "plugins"), { recursive: true });
-  await writeFile(join(codexRoot, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "hobbyka-hub", plugins: names.sort().map((name) => ({ name, source: { source: "local", path: `./plugins/${name}` }, policy: { installation: "AVAILABLE" } })) }, null, 2));
+  await atomicWriteFile(join(codexRoot, ".agents", "plugins", "marketplace.json"), JSON.stringify({ name: "hobbyka-hub", plugins: [...entries.keys()].sort().map((name) => ({ name, source: { source: "local", path: entries.get(name) }, policy: { installation: "AVAILABLE" } })) }, null, 2));
 }
 
-async function configureMarketplace(codexRoot) {
-  const hubRoot = join(codexRoot, "plugins", "hobbyka-hub");
-  try { await access(join(hubRoot, ".codex-plugin", "plugin.json")); } catch (error) {
-    if (error?.code !== "ENOENT") throw error;
-    await mkdir(dirname(hubRoot), { recursive: true });
-    await cp(dirname(dirname(script)), hubRoot, { recursive: true });
+async function configureMarketplace(codexRoot, activeRoots = {}) {
+  const roots = { ...activeRoots };
+  const currentHubRoot = roots["hobbyka-hub"] ? resolve(codexRoot, roots["hobbyka-hub"]) : await activePluginPath(codexRoot, "hobbyka-hub");
+  if (await hasPluginManifest(currentHubRoot)) {
+    if (!roots["hobbyka-hub"]) roots["hobbyka-hub"] = pluginRef(currentHubRoot);
+  } else {
+    const hubRoot = await stagePlugin(codexRoot, "hobbyka-hub", (staging) => cp(dirname(dirname(script)), staging, { recursive: true }));
+    roots["hobbyka-hub"] = pluginRef(hubRoot);
   }
-  await writeMarketplace(codexRoot);
+  await writeMarketplace(codexRoot, roots);
   const marketplaces = JSON.parse(capture(codexCommand(), ["plugin", "marketplace", "list", "--json"])).marketplaces ?? [];
   const existing = marketplaces.find((marketplace) => marketplace.name === "hobbyka-hub");
   if (managedMarketplace(existing, codexRoot)) return;
   if (existing) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka-hub"]);
   run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
   run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
+}
+
+async function stagePlugin(codexRoot, slug, populate) {
+  const versionsRoot = join(codexRoot, "plugins", ".hobbyka-versions");
+  const suffix = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const staging = join(versionsRoot, `.staging-${slug}-${suffix}`);
+  const published = join(versionsRoot, `${slug}-${suffix}`);
+  await mkdir(staging, { recursive: true });
+  try {
+    await populate(staging);
+    await rename(staging, published);
+    return published;
+  } catch (error) {
+    await rm(staging, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+function pluginRef(pluginRoot) { return `./plugins/.hobbyka-versions/${basename(pluginRoot)}`; }
+
+async function activePluginPath(codexRoot, slug) {
+  try {
+    const marketplace = JSON.parse(await readFile(join(codexRoot, ".agents", "plugins", "marketplace.json"), "utf8"));
+    const sourcePath = marketplace.plugins?.find((plugin) => plugin.name === slug)?.source?.path;
+    if (typeof sourcePath === "string") return resolve(codexRoot, sourcePath);
+  } catch { /* use the legacy direct root when no catalogue exists */ }
+  return join(codexRoot, "plugins", slug);
+}
+
+async function hasPluginManifest(pluginRoot) {
+  try { await access(join(pluginRoot, ".codex-plugin", "plugin.json")); return true; } catch { return false; }
+}
+
+async function cleanupPluginRoots(codexRoot, slug, activeRoot, previousRoot) {
+  const versionsRoot = join(codexRoot, "plugins", ".hobbyka-versions");
+  for (const name of await directories(versionsRoot)) {
+    const path = join(versionsRoot, name);
+    if (name.startsWith(`${slug}-`) && path !== activeRoot && path !== previousRoot) await rm(path, { recursive: true, force: true });
+  }
+  const legacyRoot = join(codexRoot, "plugins", slug);
+  if (legacyRoot !== activeRoot && legacyRoot !== previousRoot) await rm(legacyRoot, { recursive: true, force: true });
 }
 
 function managedMarketplace(marketplace, codexRoot) {
