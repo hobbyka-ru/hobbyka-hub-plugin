@@ -150,10 +150,10 @@ async function install(slug, { update = false, quiet = false } = {}) {
     extractArchive(archive, pluginRoot);
     await readFile(join(pluginRoot, ".codex-plugin", "plugin.json"), "utf8");
     await restoreExecutableScripts(pluginRoot);
-    await configureMarketplace(codexRoot);
-    run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
     await runPostUpdateHook(pluginRoot);
+    await configureMarketplace(codexRoot);
+    run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     const downloadId = response.headers.get("x-hobbyka-download-id");
     if (!downloadId) fail("Hub не вернул идентификатор загрузки.");
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) }, quiet);

@@ -1,0 +1,77 @@
+{
+  "title": "Hub snapshots plugins before post-update dependencies exist",
+  "project": "Hobbyka Hub",
+  "generated_at": "2026-08-17",
+  "mode": "prove-fix",
+  "original_report": "email-cli 0.3.1 help fails from the Codex cache with ERR_MODULE_NOT_FOUND for @napi-rs/keyring although the Hub installation succeeded and post-update installed dependencies in the managed marketplace copy.",
+  "discovery_scope": [
+    "Hobbyka Hub install order",
+    "email-cli post-update hook and skill entrypoint",
+    "Codex local marketplace cache boundary"
+  ],
+  "candidates": [],
+  "expected": "The post-update hook finishes preparing the managed plugin before Codex snapshots that plugin into its executable cache; email-cli help returns one JSON object with exit code 0.",
+  "actual": "Hub registered the plugin with Codex before running post-update, so the managed copy gained node_modules after the cache snapshot and the cached entrypoint could not import @napi-rs/keyring.",
+  "environment": "macOS, Node.js 26, Hobbyka Hub 0.4.33, email-cli 0.3.1",
+  "reproduction": "A focused regression extracts the real install function and requires post-update to precede marketplace registration and plugin add. The unmodified 0.4.33 order fails. A temporary email-cli managed copy then runs its real post-update hook, is copied as the cache snapshot, and its real help entrypoint returns JSON with exit 0.",
+  "failure_signal": "The focused install-order assertion fails on 0.4.33 because runPostUpdateHook appears after codex plugin add.",
+  "root_cause": "Hobbyka Hub called codex plugin add before runPostUpdateHook, while Codex snapshots the local plugin at add time.",
+  "fix_summary": "Moved the existing copy-updater and post-update preparation before configureMarketplace and codex plugin add; no email-cli-specific fallback was added.",
+  "why_causal": "Every generated runtime dependency now exists in the managed plugin before the single cache snapshot that must contain it.",
+  "reproduction_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-hub-post-update-cache-20260817/plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs",
+      "line": 21,
+      "summary": "Regression contract for post-update before cache snapshot."
+    }
+  ],
+  "fix_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-hub-post-update-cache-20260817/plugins/hobbyka-hub/bin/hobbyka-hub.mjs",
+      "line": 151,
+      "summary": "Shared causal install-order correction."
+    },
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/fix-hub-post-update-cache-20260817/plugins/hobbyka-hub/.codex-plugin/plugin.json",
+      "line": 3,
+      "summary": "Release version 0.4.34."
+    }
+  ],
+  "checks": [
+    {
+      "name": "Focused regression",
+      "status": "passed",
+      "detail": "Same command changed from exit 1 to exit 0."
+    },
+    {
+      "name": "Full Hub tests",
+      "status": "passed",
+      "detail": "13 of 13 tests passed."
+    },
+    {
+      "name": "Hub self-test",
+      "status": "passed",
+      "detail": "hobbyka-hub self-test: ok."
+    },
+    {
+      "name": "Real email-cli cache fixture",
+      "status": "passed",
+      "detail": "@napi-rs/keyring existed in the cache copy and help returned one JSON object with exit 0."
+    }
+  ],
+  "reproduce": [
+    "node --test plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs",
+    "node --test plugins/hobbyka-hub/tests/*.test.mjs",
+    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test"
+  ],
+  "limitations": [
+    "The real cache fixture was verified on macOS; Windows packaging remains covered by the existing Hub regression suite."
+  ],
+  "residual_risks": [
+    "A future post-update hook that requires its own target plugin to already be registered would need an explicit separate contract. No current shipped hook has that dependency."
+  ],
+  "notes": [
+    "The dirty standalone /Users/ardanila/code/email-cli checkout was not modified.",
+    "The fix applies to every Hub plugin with generated runtime artifacts, not only email-cli."
+  ]
+}
