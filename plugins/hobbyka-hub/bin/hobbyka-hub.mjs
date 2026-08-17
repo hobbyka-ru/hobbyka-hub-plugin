@@ -42,6 +42,8 @@ const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
 const publicHubAPI = "https://api.github.com/repos/hobbyka-ru/hobbyka-hub-plugin";
 const marketplaceRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
 const legacyRemovalPrefix = ".hobbyka-hub-legacy-removal-";
+const reportPreviewRoot = join(tmpdir(), "hobbyka-hub-report-previews");
+const reportPreviewMaxAgeMs = 24 * 60 * 60 * 1000;
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
 else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => install(args[0]));
@@ -80,13 +82,27 @@ async function submitReport(args, kind) {
     files.push({ path: resolve(path), name: basename(path), size_bytes: metadata.size });
   }
   const body_sha256 = createHash("sha256").update(body).digest("hex");
-  const operation = reportOperationID(kind, body_sha256, files);
-  if (parsed.operation && parsed.operation !== operation) return jsonFailure("failed", "invalid_operation", "Показанный --operation не соответствует содержимому отчёта. Повторите preview и подтвердите тот же текст и файлы.", 2);
+  const generatedOperation = reportOperationID(kind, body_sha256, files);
+  const previewDetails = reportPreviewDetails(kind, body_sha256, files);
+  let operation = generatedOperation;
+  let storedPreview = false;
+  if (parsed.operation && parsed.operation !== generatedOperation) {
+    operation = parsed.operation;
+    if (parsed.confirm) {
+      const savedPreview = await readReportPreview(operation);
+      if (!sameReportPreview(savedPreview, previewDetails)) return jsonFailure("failed", "invalid_operation", "Показанный --operation не соответствует содержимому отчёта. Повторите preview и подтвердите тот же текст и файлы.", 2);
+      storedPreview = true;
+    }
+  }
   const uploadOperations = files.map((_, index) => derivedOperationID(operation, index));
   const refs = [{ type: "operation", id: operation, ref: `operation:${operation}` }, ...uploadOperations.map((id) => ({ type: "operation", id, ref: `operation:${id}` }))];
   const details = { body_sha256, body_bytes: Buffer.byteLength(body), files: files.map((file, index) => ({ name: file.name, size_bytes: file.size_bytes, operation_id: uploadOperations[index] })), operation_id: operation };
   const action = reportAction(kind);
   if (!parsed.confirm) {
+    if (parsed.operation && parsed.operation !== generatedOperation) {
+      try { await saveReportPreview(operation, previewDetails); }
+      catch (error) { return jsonFailure("failed", "preview_state", error.message, 2); }
+    }
     return printJSON({ status: "ok", refs, provenance: localProvenance(), effects: { state: "planned", action, server: agentChat, required_flags: ["--confirm", `--operation ${operation}`], ...details } }, 0);
   }
   if (!parsed.operation) return jsonFailure("failed", "operation_required", "После preview повторите команду с показанным --operation UUID и --confirm.", 2, refs);
@@ -118,6 +134,7 @@ async function submitReport(args, kind) {
   if (!validReport(report, kind)) return jsonFailure("failed", "invalid_response", "Agent Chat не вернул запись ожидаемого типа.", 6, refs);
   const reportID = normalizeUUID(report.id);
   report = { ...report, id: reportID };
+  if (storedPreview) await rm(reportPreviewPath(operation), { force: true }).catch(() => {});
   return printJSON({ status: "ok", result: report, refs: [reportRef(kind, report.id), ...refs], provenance: { source: "remote", freshness: new Date().toISOString() }, effects: { state: "applied", action, ...details } }, 0);
 }
 
@@ -160,10 +177,56 @@ function derivedOperationID(operation, index) {
 function reportOperationID(kind, body_sha256, files) { return hashUUID(JSON.stringify({ kind, body_sha256, files: files.map(({ name, size_bytes }) => ({ name, size_bytes })) })); }
 
 function normalizeUUID(value) {
-  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)) return "";
+  // google/uuid.Parse accepts every canonical 36-character hex UUID, including v7/v8, nil, and any variant.
+  if (typeof value !== "string" || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)) return "";
   return value.toLowerCase();
 }
 function validUUID(value) { return Boolean(normalizeUUID(value)); }
+function reportPreviewPath(operation) {
+  const canonicalOperation = normalizeUUID(operation);
+  if (!canonicalOperation) throw new Error("operation must be a canonical UUID");
+  const path = join(reportPreviewRoot, `${canonicalOperation}.json`);
+  if (dirname(path) !== reportPreviewRoot) throw new Error("invalid report preview path");
+  return path;
+}
+function reportPreviewDetails(kind, body_sha256, files) { return { kind, body_sha256, files: files.map(({ name, size_bytes }) => ({ name, size_bytes })) }; }
+function validReportPreview(value) {
+  return value !== null && typeof value === "object" && (value.kind === "bug" || value.kind === "idea") && /^[0-9a-f]{64}$/.test(value.body_sha256 ?? "") && Number.isSafeInteger(value.created_at) && Array.isArray(value.files) && value.files.length <= 5 && value.files.every((file) => file !== null && typeof file === "object" && typeof file.name === "string" && file.name === basename(file.name) && file.name.length > 0 && file.name.length <= 255 && Number.isSafeInteger(file.size_bytes) && file.size_bytes >= 1 && file.size_bytes <= 100 * 1024 * 1024);
+}
+function sameReportPreview(saved, expected) { return validReportPreview(saved) && saved.kind === expected.kind && saved.body_sha256 === expected.body_sha256 && JSON.stringify(saved.files) === JSON.stringify(expected.files); }
+async function saveReportPreview(operation, details) {
+  const path = reportPreviewPath(operation);
+  await mkdir(reportPreviewRoot, { recursive: true, mode: 0o700 });
+  await chmod(reportPreviewRoot, 0o700);
+  await atomicPrivateWriteFile(path, JSON.stringify({ ...details, created_at: Date.now() }));
+}
+async function atomicPrivateWriteFile(path, data) {
+  const directory = dirname(path);
+  const temporaryDirectory = await mkdtemp(join(directory, `.${basename(path)}-`));
+  const temporaryPath = join(temporaryDirectory, basename(path));
+  let handle;
+  try {
+    handle = await open(temporaryPath, "wx", 0o600);
+    await handle.writeFile(data, "utf8");
+    await handle.close();
+    handle = undefined;
+    await rename(temporaryPath, path);
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+    await rm(temporaryDirectory, { recursive: true, force: true });
+  }
+}
+async function readReportPreview(operation) {
+  const path = reportPreviewPath(operation);
+  let metadata;
+  try { metadata = await stat(path); } catch (error) { if (error?.code === "ENOENT") return null; throw error; }
+  const now = Date.now();
+  if (now - metadata.mtimeMs > reportPreviewMaxAgeMs) { await rm(path, { force: true }).catch(() => {}); return null; }
+  let saved;
+  try { saved = JSON.parse(await readFile(path, "utf8")); } catch { await rm(path, { force: true }).catch(() => {}); return null; }
+  if (!validReportPreview(saved) || now - saved.created_at > reportPreviewMaxAgeMs || saved.created_at > now + 60_000) { await rm(path, { force: true }).catch(() => {}); return null; }
+  return saved;
+}
 function reportAction(kind) { return kind === "idea" ? "submit Hobbyka idea" : "report Hobbyka bug"; }
 function reportRef(kind, id) { return { type: kind, id, ref: `${kind}:${id}` }; }
 function validReport(report, kind) { return report !== null && typeof report === "object" && validUUID(report.id) && report.kind === kind; }
@@ -607,9 +670,13 @@ async function hubFetch(url, options, quiet = false) { let response; try { respo
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
 	const reportOperation = "5d90568b-58d5-481d-8ef1-2d91cd904708";
+	const reportV7 = "0190f7e3-5c5a-7abc-8def-0123456789ab";
+	const reportV8 = "0190f7e3-5c5a-8abc-8def-0123456789ab";
+	const reportOtherVariant = "0190f7e3-5c5a-8abc-0def-0123456789ab";
+	const reportNil = "00000000-0000-0000-0000-000000000000";
 	const reportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation, "--confirm"]);
 	const upperReportArgs = parseReportArgs(["--stdin", "--file", "one.png", "--file=two.log", "--operation", reportOperation.toUpperCase(), "--confirm"]);
-	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !upperReportArgs.ok || upperReportArgs.operation !== reportOperation || derivedOperationID(reportOperation.toUpperCase(), 0) !== derivedOperationID(reportOperation, 0) || !validUUID(derivedOperationID(reportOperation, 0)) || normalizeUUID("not-a-uuid") !== "") throw new Error("bug report UUID normalization failed");
+	if (!reportArgs.ok || reportArgs.files.join() !== "one.png,two.log" || reportArgs.operation !== reportOperation || !reportArgs.confirm || !upperReportArgs.ok || upperReportArgs.operation !== reportOperation || derivedOperationID(reportOperation.toUpperCase(), 0) !== derivedOperationID(reportOperation, 0) || !validUUID(derivedOperationID(reportOperation, 0)) || normalizeUUID(reportV7) !== reportV7 || normalizeUUID(reportV8) !== reportV8 || normalizeUUID(reportOtherVariant) !== reportOtherVariant || normalizeUUID(reportNil) !== reportNil || normalizeUUID(reportV7.toUpperCase()) !== reportV7 || normalizeUUID(reportV7.replaceAll("-", "")) !== "" || normalizeUUID(`urn:uuid:${reportV7}`) !== "" || normalizeUUID(`{${reportV7}}`) !== "" || normalizeUUID("not-a-uuid") !== "") throw new Error("bug report UUID normalization failed");
 	if (reportAction("bug") !== "report Hobbyka bug" || reportAction("idea") !== "submit Hobbyka idea") throw new Error("typed report preview failed");
 	if (reportRef("idea", reportOperation).ref !== `idea:${reportOperation}` || !validReport({ id: reportOperation, kind: "idea" }, "idea") || !validReport({ id: reportOperation, kind: "bug" }, "bug") || validReport({ id: reportOperation, kind: "bug" }, "idea") || validReport(null, "idea")) throw new Error("typed report response failed");
   if (!install.toString().includes("platformTarget()") || !install.toString().includes("&target=")) throw new Error("platform-targeted install failed");
