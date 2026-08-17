@@ -18,6 +18,12 @@ function isSecretFileName(name) {
   return lower.startsWith("id_") || SECRET_FILE_EXTENSIONS.test(lower);
 }
 function isPluginSlug(value) { return /^[a-z0-9-]+$/.test(value ?? ""); }
+const MAX_ARCHIVE_BYTES = 256 * 1024 * 1024;
+async function readArchiveForUpload(archive) {
+  const metadata = await stat(archive);
+  if (metadata.size > MAX_ARCHIVE_BYTES) throw new Error("Размер архива плагина не должен превышать 256 МБ.");
+  return readFile(archive);
+}
 function parsePublishArgs(args) {
   if (args.length !== 1 || !args[0] || args[0].startsWith("-")) fail("publish принимает ровно один путь к папке плагина.");
   return args[0];
@@ -294,7 +300,7 @@ async function submitProposal(root) {
     await createArchive(root, archive);
     const form = new FormData();
     form.set("baseCommit", marker.baseCommit);
-    form.set("archive", new File([await readFile(archive)], basename(archive), { type: "application/zip" }));
+    form.set("archive", new File([await readArchiveForUpload(archive)], basename(archive), { type: "application/zip" }));
     const response = await hubFetch(`${base}/api/plugins/${marker.slug}/proposals`, { method: "POST", body: form });
     if (!response.ok) fail(await response.text());
     const result = await response.json();
@@ -320,7 +326,7 @@ async function publish(directory) {
     form.set("summary", manifest.interface?.shortDescription ?? manifest.description);
     form.set("description", manifest.interface?.longDescription ?? manifest.description);
     form.set("tags", manifest.interface?.category ?? "Productivity");
-    form.set("archive", new File([await readFile(archive)], basename(archive), { type: "application/zip" }));
+    form.set("archive", new File([await readArchiveForUpload(archive)], basename(archive), { type: "application/zip" }));
     const response = await hubFetch(`${base}/api/plugins`, { method: "POST", body: form });
     if (!response.ok) fail(await response.text());
     console.log(`Плагин ${manifest.name} v${manifest.version} опубликован в Hub.`);
@@ -594,6 +600,7 @@ async function selfTest() {
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
   if (!isSecretFileName(".env") || !isSecretFileName("server.key") || !isSecretFileName("client.p12") || !isSecretFileName("id_ed25519") || isSecretFileName(".env.example") || isSecretFileName("public.pem")) throw new Error("secret file check failed");
   if (!isPluginSlug("safe-plugin") || isPluginSlug("../escape")) throw new Error("plugin slug check failed");
+  if (MAX_ARCHIVE_BYTES !== 256 * 1024 * 1024 || !readArchiveForUpload.toString().includes("stat")) throw new Error("archive size guard failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
