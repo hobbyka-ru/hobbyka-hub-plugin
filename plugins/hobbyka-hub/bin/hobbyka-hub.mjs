@@ -18,6 +18,10 @@ function isSecretFileName(name) {
   return lower.startsWith("id_") || SECRET_FILE_EXTENSIONS.test(lower);
 }
 function isPluginSlug(value) { return /^[a-z0-9-]+$/.test(value ?? ""); }
+function parsePublishArgs(args) {
+  if (args.length !== 1 || !args[0] || args[0].startsWith("-")) fail("publish принимает ровно один путь к папке плагина.");
+  return args[0];
+}
 
 const script = fileURLToPath(import.meta.url);
 if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
@@ -35,7 +39,7 @@ const legacyRemovalPrefix = ".hobbyka-hub-legacy-removal-";
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
 else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => install(args[0]));
-else if (command === "publish") await publish(args[0]);
+else if (command === "publish") await publish(parsePublishArgs(args));
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
 else if (command === "update") await withMarketplaceLock(marketplaceRoot, () => update(args.includes("--quiet")));
 else if (command === "autoupdate" && args[0] === "enable") await withMarketplaceLock(marketplaceRoot, () => enableAutoupdate());
