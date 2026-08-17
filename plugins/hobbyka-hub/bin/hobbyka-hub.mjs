@@ -20,6 +20,7 @@ const [command, ...args] = process.argv.slice(2);
 const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\/$/, "");
 const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\/$/, "");
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
+const publicHubAPI = "https://api.github.com/repos/hobbyka-ru/hobbyka-hub-plugin";
 const marketplaceRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
 const legacyRemovalPrefix = ".hobbyka-hub-legacy-removal-";
 if (command === "report-bug") await submitReport(args, "bug");
@@ -209,16 +210,21 @@ async function updatePublicHub(quiet) {
   let currentRoot = await activePluginPath(codexRoot, "hobbyka-hub");
   try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
+  let revision;
   let latest;
   try {
-    const response = await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" });
+    const commitResponse = await fetch(`${publicHubAPI}/commits/main`, { headers: { accept: "application/vnd.github+json" }, cache: "no-store" });
+    if (!commitResponse.ok) throw new Error(`HTTP ${commitResponse.status}`);
+    revision = (await commitResponse.json()).sha;
+    if (!/^[0-9a-f]{40}$/i.test(revision ?? "")) throw new Error("GitHub не вернул immutable commit SHA");
+    const response = await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/${revision}/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     latest = await response.json();
   } catch (error) { fail(`Не удалось проверить обновление Hobbyka Hub: ${error.message}`); }
   const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
   let response;
-  try { response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" }); }
+  try { response = await fetch(`${publicHub}/archive/${revision}.zip?t=${cacheBuster}`, { cache: "no-store" }); }
   catch (error) { fail(`Не удалось скачать обновление Hobbyka Hub: ${error.message}`); }
   if (!response.ok) fail("Не удалось скачать обновление Hobbyka Hub.");
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-self-update-"));
@@ -229,7 +235,10 @@ async function updatePublicHub(quiet) {
     if (!entries.length || entries.some((entry) => !isSafeEntry(entry))) fail("В обновлении Hobbyka Hub найден небезопасный путь.");
     extractArchive(archive, temp);
     const source = join(temp, entries[0].split(/[\\/]/)[0], "plugins", "hobbyka-hub");
-    await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8");
+    let archiveManifest;
+    try { archiveManifest = JSON.parse(await readFile(join(source, ".codex-plugin", "plugin.json"), "utf8")); }
+    catch (error) { fail(`Архив Hobbyka Hub не содержит корректный manifest: ${error.message}`); }
+    if (archiveManifest?.name !== "hobbyka-hub" || archiveManifest.version !== latest.version) fail("Архив Hobbyka Hub не совпадает с manifest pinned commit.");
     const pluginRoot = await stagePlugin(codexRoot, "hobbyka-hub", (staging) => cp(source, staging, { recursive: true }));
     await writeMarketplace(codexRoot, { "hobbyka-hub": pluginRef(pluginRoot) });
     run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);

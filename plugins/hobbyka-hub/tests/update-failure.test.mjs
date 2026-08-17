@@ -9,6 +9,7 @@ import test from "node:test";
 
 const cli = fileURLToPath(new URL("../bin/hobbyka-hub.mjs", import.meta.url));
 const currentVersion = JSON.parse(await readFile(new URL("../.codex-plugin/plugin.json", import.meta.url), "utf8")).version;
+const publicRevision = "0123456789abcdef0123456789abcdef01234567";
 
 async function runUpdate(fixture, mode, quiet = false) {
   return await new Promise((resolve) => {
@@ -35,6 +36,7 @@ esac
     await writeFile(join(fixture, "fetch-mock.mjs"), `
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) throw new Error("public manifest offline");
   if (url.includes("raw.githubusercontent.com")) throw new Error("public manifest offline");
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [] }));
   return new Response("not found", { status: 404 });
@@ -55,6 +57,7 @@ test("quiet update returns failure when the private catalog cannot be checked (C
     await writeFile(join(fixture, "fetch-mock.mjs"), `
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(publicRevision)} }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }));
   if (url.endsWith("/api/plugins")) throw new Error("private catalog offline");
   return new Response("not found", { status: 404 });
@@ -80,6 +83,7 @@ esac
     await writeFile(join(fixture, "fetch-mock.mjs"), `
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(publicRevision)} }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [{ slug: "sample", version: "2.0.0" }] }));
   if (url.includes("/api/plugins/sample/download")) throw new Error("plugin download offline");
@@ -101,8 +105,9 @@ test("quiet update returns failure when the public archive cannot be downloaded 
     await writeFile(join(fixture, "fetch-mock.mjs"), `
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(publicRevision)} }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: "999.0.0" }));
-  if (url.includes("/archive/refs/heads/main.zip")) return new Response("upstream unavailable", { status: 503 });
+  if (url.includes("/archive/" + ${JSON.stringify(publicRevision)} + ".zip") || url.includes("/archive/refs/heads/main.zip")) return new Response("upstream unavailable", { status: 503 });
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [] }));
   return new Response("not found", { status: 404 });
 };
@@ -127,6 +132,7 @@ esac
     await writeFile(join(fixture, "fetch-mock.mjs"), `
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(publicRevision)} }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [{ slug: "legacy", version: "1.0.0" }] }));
   if (url.includes("/api/plugins/legacy/download")) throw new Error("legacy download offline");
@@ -163,6 +169,7 @@ import { readFile } from "node:fs/promises";
 const archive = ${JSON.stringify(archive)};
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(publicRevision)} }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [{ slug: "sample", version: "2.0.0" }] }));
   if (url.includes("/api/plugins/sample/download")) return new Response(await readFile(archive), { headers: { "x-hobbyka-sha256": ${JSON.stringify(archiveHash)}, "x-hobbyka-download-id": "cr337-confirmation" } });

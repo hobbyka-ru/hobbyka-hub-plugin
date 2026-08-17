@@ -35,8 +35,9 @@ import { readFile } from "node:fs/promises";
 const archive = ${JSON.stringify(archive)};
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: "0123456789abcdef0123456789abcdef01234567" }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: "2.0.0" }));
-  if (url.includes("/archive/refs/heads/main.zip")) return new Response(await readFile(archive));
+  if (url.includes("/archive/")) return new Response(await readFile(archive));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [] }));
   return new Response("not found", { status: 404 });
 };

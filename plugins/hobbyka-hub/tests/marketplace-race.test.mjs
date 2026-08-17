@@ -32,6 +32,7 @@ const manifestVersion = ${JSON.stringify(manifest.version)};
 globalThis.fetch = async (input) => {
   const url = String(input);
   const slug = process.env.CR333_SLUG;
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: "0123456789abcdef0123456789abcdef01234567" }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: manifestVersion }));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [{ slug, version: "2.0.0" }] }));
   if (url.includes("/api/plugins/" + slug + "/download")) {

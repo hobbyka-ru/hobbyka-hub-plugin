@@ -79,6 +79,7 @@ import { readFile } from "node:fs/promises";
 const archive = ${JSON.stringify(archive)};
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) return new Response(JSON.stringify({ sha: "0123456789abcdef0123456789abcdef01234567" }));
   if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }));
   if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [{ slug: "legacy", version: "2.0.0" }] }));
   if (url.includes("/api/plugins/legacy/download")) return new Response(await readFile(archive), { headers: { "x-hobbyka-sha256": ${JSON.stringify(archiveHash)}, "x-hobbyka-download-id": "cr338" } });
