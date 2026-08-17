@@ -21,6 +21,7 @@ const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\
 const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\/$/, "");
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
 const marketplaceRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
+const legacyRemovalPrefix = ".hobbyka-hub-legacy-removal-";
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
 else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => install(args[0]));
@@ -178,10 +179,14 @@ async function update(quiet = false) {
   if (!response.ok) fail(await response.text());
   const remote = (await response.json()).plugins;
   let allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
+  await reconcileLegacyRemovals(codexRoot, allInstalled);
+  allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   for (const slug of legacySlugs(allInstalled, remote)) {
+    await markLegacyRemoval(codexRoot, slug);
     const installed = await install(slug, { update: true, quiet });
     if (!installed) fail(`Не удалось обновить плагин ${slug}.`);
-    run(codexCommand(), ["plugin", "remove", `${slug}@hobbyka`]);
+    allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
+    await reconcileLegacyRemovals(codexRoot, allInstalled);
   }
   allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   if (!allInstalled.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka")) {
@@ -479,6 +484,26 @@ async function runPostUpdateHook(pluginRoot, ...args) {
   try { await access(hook); } catch (error) { if (error?.code === "ENOENT") return false; throw error; }
   run(process.execPath, [hook, ...args], pluginRoot);
   return true;
+}
+function legacyRemovalMarker(codexRoot, slug) { return join(codexRoot, `${legacyRemovalPrefix}${slug}.json`); }
+async function markLegacyRemoval(codexRoot, slug) { await atomicWriteFile(legacyRemovalMarker(codexRoot, slug), JSON.stringify({ marketplace: "hobbyka", slug })); }
+async function reconcileLegacyRemovals(codexRoot, installed) {
+  let entries;
+  try { entries = await readdir(codexRoot); } catch (error) { if (error?.code === "ENOENT") return; throw error; }
+  for (const name of entries.filter((entry) => entry.startsWith(legacyRemovalPrefix) && entry.endsWith(".json"))) {
+    const path = join(codexRoot, name);
+    let marker;
+    try { marker = JSON.parse(await readFile(path, "utf8")); } catch (error) { fail(`Не удалось прочитать marker удаления legacy plugin: ${error.message}`); }
+    if (marker?.marketplace !== "hobbyka" || !/^[a-z0-9-]+$/.test(marker.slug ?? "") || name !== `${legacyRemovalPrefix}${marker.slug}.json`) fail("Некорректный marker удаления legacy plugin.");
+    const replacement = installed.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub" && plugin.name === marker.slug);
+    if (!replacement) continue;
+    const present = installed.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && plugin.name === marker.slug);
+    if (!present) { await rm(path, { force: true }); continue; }
+    const result = run(codexCommand(), ["plugin", "remove", `${marker.slug}@hobbyka`], undefined, true);
+    if (result.error) fail(result.error.message);
+    if (result.status !== 0) fail(`Не удалось удалить legacy plugin ${marker.slug}; повторите update для reconciliation.`);
+    await rm(path, { force: true });
+  }
 }
 function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug)); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
 function listArchive(archive) { return platform() !== "win32" ? capture("unzip", ["-Z1", archive]) : capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries | ForEach-Object {$_.FullName}} finally {$z.Dispose()}", archive]); }
