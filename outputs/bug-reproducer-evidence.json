@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "status": "FIX_PROVEN",
+  "reason": "The same reproducer changed from failing to passing and broader checks passed.",
+  "reproduction": "confirmed",
+  "full_suite": "passed",
+  "same_command": true,
+  "before": {
+    "schema_version": 1,
+    "label": "reproduced",
+    "captured_at": "2026-08-14T10:30:42.001896+00:00",
+    "command": [
+      "node",
+      "--test",
+      "/tmp/hub-windows-repair-regression.test.mjs"
+    ],
+    "cwd": "/private/tmp/hub-windows-red-20260814",
+    "runtime": "Python 3.9.6 on Darwin arm64",
+    "duration_ms": 60.266,
+    "exit_code": 1,
+    "timed_out": false,
+    "stdout": "\u2716 Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 36.4785\n\n\u2716 failing tests:\n\ntest at ../hub-windows-repair-regression.test.mjs:8:1\n\u2716 Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)\n  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n  \n    assert.ok(definition)\n  \n      at TestContext.<anonymous> (file:///private/tmp/hub-windows-repair-regression.test.mjs:10:10)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1106:25)\n      at Test.start (node:internal/test_runner/test:1003:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n",
+    "stderr": "",
+    "stdout_truncated": false,
+    "stderr_truncated": false,
+    "secrets_redacted": true
+  },
+  "after": {
+    "schema_version": 1,
+    "label": "fixed",
+    "captured_at": "2026-08-14T10:30:46.319692+00:00",
+    "command": [
+      "node",
+      "--test",
+      "/tmp/hub-windows-repair-regression.test.mjs"
+    ],
+    "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814",
+    "runtime": "Python 3.9.6 on Darwin arm64",
+    "duration_ms": 77.085,
+    "exit_code": 0,
+    "timed_out": false,
+    "stdout": "\u2714 Windows repair uses a shell only for schtasks and skips only Unix mode checks (0.982333ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 1\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 45.294708\n",
+    "stderr": "",
+    "stdout_truncated": false,
+    "stderr_truncated": false,
+    "secrets_redacted": true
+  }
+}

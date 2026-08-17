@@ -19,6 +19,11 @@ description: Use when сотрудник просит установить, об
 
 Ручная проверка: `node <plugin-root>/bin/hobbyka-hub.mjs update`.
 
+Восстановление старой установки без удаления пользовательских данных:
+`node <plugin-root>/bin/hobbyka-hub.mjs repair`. Команда регистрирует управляемый
+локальный marketplace, переносит плагины из старого `hobbyka`, обновляет их и
+включает единственный фоновый обновлятор Hobbyka Hub.
+
 Управление фоновым обновлением: `node <plugin-root>/bin/hobbyka-hub.mjs autoupdate enable|disable`.
 
 ## Публикация

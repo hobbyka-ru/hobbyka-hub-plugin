@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
+import { createServer } from "node:http";
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 
@@ -42,4 +43,42 @@ test("rejects stdin larger than 32 KB instead of silently truncating it", () => 
       return true;
     },
   );
+});
+
+test("sends the reporting Codex thread so a missing Inbox can be bound", async () => {
+  const thread = "550e8400-e29b-41d4-a716-446655440001";
+  const preview = JSON.parse(execFileSync(process.execPath, [join(root, "bin", "hobbyka-hub.mjs"), "report-bug", "--stdin"], {
+    encoding: "utf8",
+    input: "Баг",
+    env: { ...process.env, HOBBYKA_HUB_CA_READY: "1" },
+  }));
+  const operation = preview.effects.operation_id;
+  let requestBody;
+  const server = createServer((request, response) => {
+    let body = "";
+    request.setEncoding("utf8");
+    request.on("data", (chunk) => { body += chunk; });
+    request.on("end", () => {
+      requestBody = JSON.parse(body);
+      response.setHeader("content-type", "application/json");
+      response.end(JSON.stringify({ id: "550e8400-e29b-41d4-a716-446655440002", kind: "bug" }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const address = server.address();
+    const child = spawn(process.execPath, [join(root, "bin", "hobbyka-hub.mjs"), "report-bug", "--stdin", "--operation", operation, "--confirm"], {
+      env: { ...process.env, HOBBYKA_HUB_CA_READY: "1", HOBBYKA_AGENT_CHAT_URL: `http://127.0.0.1:${address.port}`, CODEX_THREAD_ID: thread },
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+    child.stdin.end("Баг");
+    let output = "";
+    child.stdout.setEncoding("utf8");
+    child.stdout.on("data", (chunk) => { output += chunk; });
+    const code = await new Promise((resolve) => child.on("close", resolve));
+    assert.equal(code, 0, output);
+    assert.equal(requestBody.target_thread_id, thread);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
 });

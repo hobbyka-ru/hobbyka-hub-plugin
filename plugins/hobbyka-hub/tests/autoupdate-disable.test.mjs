@@ -18,6 +18,7 @@ async function runDisable({ fixture, preload, platform: platformOverride, mode, 
         PATH: `${fixture}:${process.env.PATH ?? ""}`,
         HOBBYKA_HUB_CA_READY: "1",
         ...(platformOverride ? { CR336_PLATFORM: platformOverride } : {}),
+        ...(platformOverride === "win32" ? { ComSpec: join(fixture, "schtasks.exe") } : {}),
         ...(mode ? { CR336_MODE: mode } : {}),
         ...(trace ? { CR336_TRACE: trace } : {}),
       },
@@ -165,6 +166,12 @@ test("autoupdate disable reports a present Windows task and succeeds only when i
   try {
     await writePlatformPreload(preload);
     await writeFile(schtasks, `#!/bin/sh
+if [ "$1" = /d ]; then
+  case "$4" in
+    *'"/Delete"'*) set -- /Delete ;;
+    *'"/Query"'*) set -- /Query ;;
+  esac
+fi
 printf '%s %s\\n' "$CR336_MODE" "$*" >> "$CR336_TRACE"
 case "$1" in
   /Delete) exit 0 ;;

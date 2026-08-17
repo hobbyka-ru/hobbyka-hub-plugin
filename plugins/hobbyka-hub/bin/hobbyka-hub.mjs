@@ -46,14 +46,15 @@ const reportPreviewRoot = join(tmpdir(), "hobbyka-hub-report-previews");
 const reportPreviewMaxAgeMs = 24 * 60 * 60 * 1000;
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
-else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => install(args[0]));
+else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => installAndReconcile(args[0]));
 else if (command === "publish") await publish(parsePublishArgs(args));
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
 else if (command === "update") await withMarketplaceLock(marketplaceRoot, () => update(args.includes("--quiet")));
+else if (command === "repair") await withMarketplaceLock(marketplaceRoot, () => repair());
 else if (command === "autoupdate" && args[0] === "enable") await withMarketplaceLock(marketplaceRoot, () => enableAutoupdate());
 else if (command === "autoupdate" && args[0] === "disable") await withMarketplaceLock(marketplaceRoot, () => disableAutoupdate());
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable");
 
 async function submitReport(args, kind) {
   const parsed = parseReportArgs(args);
@@ -125,7 +126,8 @@ async function submitReport(args, kind) {
     attachmentIDs.push(attachmentID);
   }
   let response;
-  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, body, attachment_ids: attachmentIDs, operation_id: operation }), signal }); }
+  const targetThreadID = validUUID(process.env.CODEX_THREAD_ID) ? process.env.CODEX_THREAD_ID : undefined;
+  try { response = await fetch(`${agentChat}/agent/v1/bug-reports`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, body, attachment_ids: attachmentIDs, target_thread_id: targetThreadID, operation_id: operation }), signal }); }
   catch (error) { return jsonFailure("outcome_unknown", "outcome_unknown", error.message, 5, refs); }
   if (!response.ok) return jsonFailure("failed", "rejected", await response.text(), 4, refs);
   let report;
@@ -253,10 +255,10 @@ async function install(slug, { update = false, quiet = false } = {}) {
       await readFile(join(staging, ".codex-plugin", "plugin.json"), "utf8");
       await restoreExecutableScripts(staging);
     });
-    await configureMarketplace(codexRoot, { [slug]: pluginRef(pluginRoot) });
-    run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     if (slug === "hobbyka-hub") await copyUpdater(pluginRoot);
     await runPostUpdateHook(pluginRoot);
+    await configureMarketplace(codexRoot, { [slug]: pluginRef(pluginRoot) });
+    run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
     const downloadId = response.headers.get("x-hobbyka-download-id");
     if (!downloadId) fail("Hub не вернул идентификатор загрузки.");
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) });
@@ -268,6 +270,20 @@ async function install(slug, { update = false, quiet = false } = {}) {
   } finally {
     await rm(temp, { recursive: true, force: true });
   }
+}
+
+async function installAndReconcile(slug) {
+  await install(slug);
+  await update(true);
+}
+
+async function repair() {
+  const codexRoot = join(homedir(), ".codex", "hobbyka-hub-marketplace");
+  await updatePublicHub(false);
+  await configureMarketplace(codexRoot);
+  await enableAutoupdate(true, await activePluginPath(codexRoot, "hobbyka-hub"));
+  await update(false);
+  console.log("Hobbyka Hub восстановлен, старые установки согласованы, автообновление включено.");
 }
 
 async function update(quiet = false) {
@@ -292,7 +308,7 @@ async function update(quiet = false) {
     if (marketplaces.some((marketplace) => marketplace.name === "hobbyka")) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka"]);
   }
   const installed = allInstalled
-    .filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub")
+    .filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub" && plugin.name !== "hobbyka-hub")
     .map((plugin) => ({ slug: plugin.name, version: plugin.version }));
   const pending = installed.filter((local) => remote.some((plugin) => plugin.slug === local.slug && plugin.version !== local.version)).sort((left, right) => left.slug === "hobbyka-hub" ? 1 : right.slug === "hobbyka-hub" ? -1 : left.slug.localeCompare(right.slug));
   for (const plugin of pending) {
@@ -425,7 +441,7 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
   } else if (platform() === "win32") {
     const launcher = join(dirname(stableScript), "update-hidden.vbs");
     await atomicWriteFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
-    run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", `wscript.exe "${launcher}"`]);
+    run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", windowsTaskAction(launcher)]);
   } else if (platform() === "linux") {
     const systemd = linuxSystemd();
     const units = linuxUnits(process.execPath, stableScript, codex);
@@ -507,7 +523,7 @@ async function configureMarketplace(codexRoot, activeRoots = {}) {
   const existing = marketplaces.find((marketplace) => marketplace.name === "hobbyka-hub");
   if (managedMarketplace(existing, codexRoot)) return;
   if (existing) run(codexCommand(), ["plugin", "marketplace", "remove", "hobbyka-hub"]);
-  run(codexCommand(), ["plugin", "marketplace", "add", codexRoot]);
+  run(codexCommand(), ["plugin", "marketplace", "add", "."], codexRoot);
   run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
 }
 
@@ -618,9 +634,9 @@ async function reconcileLegacyRemovals(codexRoot, installed) {
     await rm(path, { force: true });
   }
 }
-function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug)); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
-function listArchive(archive) { return platform() !== "win32" ? capture("unzip", ["-Z1", archive]) : capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries | ForEach-Object {$_.FullName}} finally {$z.Dispose()}", archive]); }
-function extractArchive(archive, target) { if (platform() !== "win32") return run("unzip", ["-q", archive, "-d", target]); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force", archive, target]); }
+function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug).filter((slug) => slug !== "hobbyka-hub")); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
+function listArchive(archive) { return platform() === "win32" ? capture("tar.exe", ["-tf", archive]) : capture("unzip", ["-Z1", archive]); }
+function extractArchive(archive, target) { if (platform() !== "win32") return run("unzip", ["-q", archive, "-d", target]); run("tar.exe", ["-xf", archive, "-C", target]); }
 async function assertNoSecretFiles(root, relative = "") {
   for (const entry of await readdir(root, { withFileTypes: true })) {
     const path = relative ? `${relative}/${entry.name}` : entry.name;
@@ -628,7 +644,7 @@ async function assertNoSecretFiles(root, relative = "") {
     if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules") await assertNoSecretFiles(join(root, entry.name), path);
   }
 }
-async function createArchive(root, archive) { await assertNoSecretFiles(root); if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$items=Get-ChildItem -LiteralPath $args[0] -Force | Where-Object {$_.Name -notin @('.git','node_modules','.DS_Store','.hobbyka-proposal.json')}; Compress-Archive -Path $items.FullName -DestinationPath $args[1] -Force", root, archive]); }
+async function createArchive(root, archive) { await assertNoSecretFiles(root); if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("tar.exe", ["-a", "-cf", archive, "--exclude=.git", "--exclude=node_modules", "--exclude=.DS_Store", "--exclude=.hobbyka-proposal.json", "-C", root, "."]); }
 function isSafeEntry(entry) { const path = entry.replaceAll("\\", "/"); return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) && !path.includes("\0") && !path.split("/").includes(".."); }
 function codexCommand() { return process.env.HOBBYKA_CODEX_COMMAND || (platform() === "win32" ? "codex.cmd" : "codex"); }
 function platformTarget(os = platform(), cpu = arch()) { return `${os === "win32" ? "windows" : os}-${cpu === "x64" ? "amd64" : cpu}`; }
@@ -664,8 +680,12 @@ function windowsLauncher(node, updater, codex) { const escape = (value) => value
 function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
 function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
 function linuxUnits(node, updater, codex, home = homedir()) { return { service: `[Unit]\nDescription=Update Hobbyka Hub plugins\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nEnvironment=${systemdQuote(`HOBBYKA_CODEX_COMMAND=${codex}`)}\nEnvironment=${systemdQuote(`HOME=${home}`)}\nExecStart=${systemdQuote(node)} ${systemdQuote(updater)} update --quiet\n`, timer: `[Unit]\nDescription=Check Hobbyka Hub plugin updates every 15 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n` }; }
-function run(executable, args, cwd, allowFailure = false) { const result = spawnSync(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); return result; }
-function capture(executable, args) { const result = spawnSync(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
+function windowsTaskAction(launcher) { const script = `& 'wscript.exe' '${String(launcher).replaceAll("'", "''")}'`; return `powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${Buffer.from(script, "utf16le").toString("base64")}`; }
+function windowsCommand(executable, args) { const values = [executable, ...args].map(String); if (values.some((value) => /[\r\n"&|<>^%!]/.test(value))) fail("Команда Windows содержит небезопасный аргумент."); return values.map((value) => `"${value}"`).join(" "); }
+function windowsShellRequired(executable, os = platform()) { return os === "win32" && (/\.(?:cmd|bat)$/i.test(executable) || basename(executable).toLowerCase() === "schtasks.exe"); }
+function spawnProcess(executable, args, options) { if (!windowsShellRequired(executable)) return spawnSync(executable, args, options); const command = `"${windowsCommand(executable, args)}"`; return spawnSync(process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", command], { ...options, windowsHide: true, windowsVerbatimArguments: true }); }
+function run(executable, args, cwd, allowFailure = false) { const result = spawnProcess(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); return result; }
+function capture(executable, args) { const result = spawnProcess(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
 async function selfTest() {
@@ -692,6 +712,8 @@ async function selfTest() {
   if (MAX_ARCHIVE_BYTES !== 256 * 1024 * 1024 || !readArchiveForUpload.toString().includes("stat")) throw new Error("archive size guard failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
+  if (legacySlugs([{ name: "hobbyka-hub", installed: true, marketplaceName: "hobbyka" }], [{ slug: "hobbyka-hub" }]).length) throw new Error("public Hub ownership failed");
+  if (!update.toString().includes('plugin.name !== "hobbyka-hub"')) throw new Error("public Hub update ownership failed");
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
   const fixture = await mkdtemp(join(tmpdir(), "hobbyka-hook-test-"));
   try {
@@ -706,8 +728,10 @@ async function selfTest() {
     const config = join(fixture, "scripts", "config.json");
     await writeFile(launcher, "#!/bin/sh\nexit 0\n", { mode: 0o644 });
     await writeFile(config, "{}\n", { mode: 0o644 });
-    await restoreExecutableScripts(fixture);
-    if (((await stat(launcher)).mode & 0o111) === 0 || ((await stat(config)).mode & 0o111) !== 0) throw new Error("executable script restoration failed");
+    if (platform() !== "win32") {
+      await restoreExecutableScripts(fixture);
+      if (((await stat(launcher)).mode & 0o111) === 0 || ((await stat(config)).mode & 0o111) !== 0) throw new Error("executable script restoration failed");
+    }
     const marker = join(fixture, "ran");
     await runPostUpdateHook(fixture, marker);
     if (await readFile(marker, "utf8") !== "ok") throw new Error("post-update hook failed");

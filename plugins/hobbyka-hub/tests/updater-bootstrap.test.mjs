@@ -38,17 +38,25 @@ import { readFile } from "node:fs/promises";
 const archive = ${JSON.stringify(archive)};
 globalThis.fetch = async (input) => {
   const url = String(input);
+  if (url.includes("api.github.com/repos/hobbyka-ru/hobbyka-hub-plugin/commits/main")) {
+    return Response.json({ sha: "0123456789abcdef0123456789abcdef01234567" });
+  }
+  if (url.includes("raw.githubusercontent.com") && url.includes("/.codex-plugin/plugin.json")) {
+    return Response.json({ name: "hobbyka-hub", version: "9.9.9", description: "fresh" });
+  }
   if (url.includes("/api/plugins/hobbyka-hub/download")) {
     const bytes = await readFile(archive);
     return new Response(bytes, { headers: { "x-hobbyka-sha256": createHash("sha256").update(bytes).digest("hex"), "x-hobbyka-download-id": "cr334" } });
   }
   if (url.includes("/api/downloads/cr334/confirm")) return new Response("{}");
+  if (url.endsWith("/api/plugins")) return Response.json({ plugins: [] });
   return new Response("not found", { status: 404 });
 };
 `, "utf8");
     await writeFile(codex, `#!/bin/sh
 case "$*" in
   'plugin marketplace list --json') printf '%s\\n' '{"marketplaces":[]}' ;;
+  'plugin list --json') printf '%s\\n' '{"installed":[{"name":"hobbyka-hub","installed":true,"marketplaceName":"hobbyka-hub","version":"9.9.9"}]}' ;;
 esac
 `, { mode: 0o755 });
     await writeFile(launchctl, `#!/bin/sh
