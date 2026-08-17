@@ -163,7 +163,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) }, quiet);
     if (!confirmation) return false;
     if (!confirmation.ok) fail(`Плагин установлен, но Hub не подтвердил регистрацию: ${await confirmation.text()}`);
-    if (!update) await enableAutoupdate(true);
+    if (!update) await enableAutoupdate(true, slug === "hobbyka-hub" ? pluginRoot : undefined);
     await cleanupPluginRoots(codexRoot, slug, pluginRoot, previousRoot);
     if (!quiet) console.log(`Плагин ${slug} ${update ? "обновлён" : "установлен"} и подтверждён в Hub.`);
     return true;
