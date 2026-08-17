@@ -17,6 +17,7 @@ function isSecretFileName(name) {
   if (lower.startsWith(".env.")) return ![".env.example", ".env.sample", ".env.template"].includes(lower);
   return lower.startsWith("id_") || SECRET_FILE_EXTENSIONS.test(lower);
 }
+function isPluginSlug(value) { return /^[a-z0-9-]+$/.test(value ?? ""); }
 
 const script = fileURLToPath(import.meta.url);
 if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
@@ -146,7 +147,7 @@ function jsonFailure(status, code, message, exitCode, refs = []) { return printJ
 function printJSON(value, exitCode) { console.log(JSON.stringify(value)); process.exitCode = exitCode; return value; }
 
 async function install(slug, { update = false, quiet = false } = {}) {
-  if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");
+  if (!isPluginSlug(slug)) fail("Некорректный slug плагина.");
   const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=${update ? "update" : "agent"}&target=${platformTarget()}`, undefined, quiet);
   if (!response) return false;
   if (!response.ok) fail(await response.text());
@@ -260,7 +261,7 @@ async function updatePublicHub(quiet) {
 async function propose(value, submit, destination) {
   if (submit) return submitProposal(resolve(value ?? ""));
   const slug = value;
-  if (!/^[a-z0-9-]+$/.test(slug ?? "")) fail("Некорректный slug плагина.");
+  if (!isPluginSlug(slug)) fail("Некорректный slug плагина.");
   const target = resolve(destination ?? `${slug}-proposal`);
   try { await access(target); fail(`Папка уже существует: ${target}`); } catch (error) { if (error?.code !== "ENOENT") throw error; }
   const response = await hubFetch(`${base}/api/plugins/${slug}/download?source=propose`);
@@ -282,10 +283,10 @@ async function propose(value, submit, destination) {
 
 async function submitProposal(root) {
   const marker = JSON.parse(await readFile(join(root, ".hobbyka-proposal.json"), "utf8"));
-  if (!/^[a-z0-9-]+$/.test(marker.slug ?? "") || !/^[0-9a-f]{40}$/.test(marker.baseCommit ?? "")) fail("В папке нет корректного предложения ХАБа.");
+  if (!isPluginSlug(marker.slug) || !/^[0-9a-f]{40}$/.test(marker.baseCommit ?? "")) fail("В папке нет корректного предложения ХАБа.");
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-proposal-"));
   try {
-    const archive = join(temp, `${marker.slug}.zip`);
+    const archive = join(temp, "plugin.zip");
     await createArchive(root, archive);
     const form = new FormData();
     form.set("baseCommit", marker.baseCommit);
@@ -302,10 +303,11 @@ async function submitProposal(root) {
 async function publish(directory) {
   const root = resolve(directory ?? "");
   const manifest = JSON.parse(await readFile(join(root, ".codex-plugin", "plugin.json"), "utf8"));
+  if (!isPluginSlug(manifest.name)) fail("Некорректный slug плагина.");
   if (!manifest.name || !manifest.version || !manifest.description) fail("В plugin.json нужны name, version и description.");
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-publish-"));
   try {
-    const archive = join(temp, `${manifest.name}.zip`);
+    const archive = join(temp, "plugin.zip");
     await createArchive(root, archive);
     const form = new FormData();
     form.set("name", manifest.interface?.displayName ?? manifest.name);
@@ -511,7 +513,7 @@ async function reconcileLegacyRemovals(codexRoot, installed) {
     const path = join(codexRoot, name);
     let marker;
     try { marker = JSON.parse(await readFile(path, "utf8")); } catch (error) { fail(`Не удалось прочитать marker удаления legacy plugin: ${error.message}`); }
-    if (marker?.marketplace !== "hobbyka" || !/^[a-z0-9-]+$/.test(marker.slug ?? "") || name !== `${legacyRemovalPrefix}${marker.slug}.json`) fail("Некорректный marker удаления legacy plugin.");
+    if (marker?.marketplace !== "hobbyka" || !isPluginSlug(marker.slug) || name !== `${legacyRemovalPrefix}${marker.slug}.json`) fail("Некорректный marker удаления legacy plugin.");
     const replacement = installed.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub" && plugin.name === marker.slug);
     if (!replacement) continue;
     const present = installed.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && plugin.name === marker.slug);
@@ -587,6 +589,7 @@ async function selfTest() {
   if (!units.service.includes('Environment="HOBBYKA_CODEX_COMMAND=/path/codex"') || !units.service.includes('Environment="HOME=/home/test"') || !units.service.includes('ExecStart="/path/node" "/path/updater" update --quiet') || !units.timer.includes("OnUnitActiveSec=15min")) throw new Error("Linux schedule failed");
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
   if (!isSecretFileName(".env") || !isSecretFileName("server.key") || !isSecretFileName("client.p12") || !isSecretFileName("id_ed25519") || isSecretFileName(".env.example") || isSecretFileName("public.pem")) throw new Error("secret file check failed");
+  if (!isPluginSlug("safe-plugin") || isPluginSlug("../escape")) throw new Error("plugin slug check failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
