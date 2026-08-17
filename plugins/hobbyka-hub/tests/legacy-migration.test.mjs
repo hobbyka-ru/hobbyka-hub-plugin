@@ -7,6 +7,7 @@ import { spawnSync } from "node:child_process";
 import test from "node:test";
 
 const cli = fileURLToPath(new URL("../bin/hobbyka-hub.mjs", import.meta.url));
+const currentVersion = JSON.parse(await readFile(new URL("../.codex-plugin/plugin.json", import.meta.url), "utf8")).version;
 
 test("failed legacy migration keeps the working registration (CR-332)", async () => {
   const fixture = await mkdtemp(join(tmpdir(), "hobbyka-hub-cr332-"));
@@ -18,7 +19,7 @@ test("failed legacy migration keeps the working registration (CR-332)", async ()
 globalThis.fetch = async (input) => {
   const url = String(input);
   if (url.includes("raw.githubusercontent.com")) {
-    return new Response(JSON.stringify({ version: "999.0.0" }), {
+    return new Response(JSON.stringify({ version: ${JSON.stringify(currentVersion)} }), {
       headers: { "content-type": "application/json" },
     });
   }
@@ -62,8 +63,10 @@ esac
       },
     });
 
-    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
-    const commands = await readFile(trace, "utf8");
+    assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /Установленные плагины из ХАБа уже актуальны/);
+    let commands = "";
+    try { commands = await readFile(trace, "utf8"); } catch (error) { assert.equal(error.code, "ENOENT"); }
     assert.doesNotMatch(commands, /plugin remove legacy@hobbyka/);
   } finally {
     await rm(fixture, { recursive: true, force: true });

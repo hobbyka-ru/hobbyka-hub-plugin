@@ -160,8 +160,7 @@ async function install(slug, { update = false, quiet = false } = {}) {
     await runPostUpdateHook(pluginRoot);
     const downloadId = response.headers.get("x-hobbyka-download-id");
     if (!downloadId) fail("Hub не вернул идентификатор загрузки.");
-    const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) }, quiet);
-    if (!confirmation) return false;
+    const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) });
     if (!confirmation.ok) fail(`Плагин установлен, но Hub не подтвердил регистрацию: ${await confirmation.text()}`);
     if (!update) await enableAutoupdate(true, slug === "hobbyka-hub" ? pluginRoot : undefined);
     await cleanupPluginRoots(codexRoot, slug, pluginRoot, previousRoot);
@@ -175,14 +174,14 @@ async function install(slug, { update = false, quiet = false } = {}) {
 async function update(quiet = false) {
   const codexRoot = marketplaceRoot;
   await updatePublicHub(quiet);
-  const response = await hubFetch(`${base}/api/plugins`, undefined, quiet);
-  if (!response) return;
-  if (!response.ok) { if (quiet) return; fail(await response.text()); }
+  const response = await hubFetch(`${base}/api/plugins`);
+  if (!response.ok) fail(await response.text());
   const remote = (await response.json()).plugins;
   let allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   for (const slug of legacySlugs(allInstalled, remote)) {
     const installed = await install(slug, { update: true, quiet });
-    if (installed) run(codexCommand(), ["plugin", "remove", `${slug}@hobbyka`]);
+    if (!installed) fail(`Не удалось обновить плагин ${slug}.`);
+    run(codexCommand(), ["plugin", "remove", `${slug}@hobbyka`]);
   }
   allInstalled = JSON.parse(capture(codexCommand(), ["plugin", "list", "--json"])).installed;
   if (!allInstalled.some((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka")) {
@@ -193,7 +192,9 @@ async function update(quiet = false) {
     .filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka-hub")
     .map((plugin) => ({ slug: plugin.name, version: plugin.version }));
   const pending = installed.filter((local) => remote.some((plugin) => plugin.slug === local.slug && plugin.version !== local.version)).sort((left, right) => left.slug === "hobbyka-hub" ? 1 : right.slug === "hobbyka-hub" ? -1 : left.slug.localeCompare(right.slug));
-  for (const plugin of pending) await install(plugin.slug, { update: true, quiet });
+  for (const plugin of pending) {
+    if (!await install(plugin.slug, { update: true, quiet })) fail(`Не удалось обновить плагин ${plugin.slug}.`);
+  }
   for (const plugin of installed.filter((local) => !pending.some((pendingPlugin) => pendingPlugin.slug === local.slug))) await runPostUpdateHook(await activePluginPath(codexRoot, plugin.slug));
   if (!quiet) console.log(pending.length ? `Обновлено плагинов: ${pending.length}.` : "Установленные плагины из ХАБа уже актуальны.");
 }
@@ -204,11 +205,17 @@ async function updatePublicHub(quiet) {
   try { await access(join(currentRoot, ".codex-plugin", "plugin.json")); } catch (error) { if (error?.code === "ENOENT") currentRoot = dirname(dirname(script)); else throw error; }
   const cacheBuster = Date.now();
   let latest;
-  try { latest = await (await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" })).json(); } catch { return false; }
+  try {
+    const response = await fetch(`${publicHub.replace("github.com", "raw.githubusercontent.com")}/main/plugins/hobbyka-hub/.codex-plugin/plugin.json?t=${cacheBuster}`, { cache: "no-store" });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    latest = await response.json();
+  } catch (error) { fail(`Не удалось проверить обновление Hobbyka Hub: ${error.message}`); }
   const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
-  const response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" });
-  if (!response.ok) { if (!quiet) fail("Не удалось скачать обновление Hobbyka Hub."); return false; }
+  let response;
+  try { response = await fetch(`${publicHub}/archive/refs/heads/main.zip?t=${cacheBuster}`, { cache: "no-store" }); }
+  catch (error) { fail(`Не удалось скачать обновление Hobbyka Hub: ${error.message}`); }
+  if (!response.ok) fail("Не удалось скачать обновление Hobbyka Hub.");
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-self-update-"));
   try {
     const archive = join(temp, "hobbyka-hub.zip");
