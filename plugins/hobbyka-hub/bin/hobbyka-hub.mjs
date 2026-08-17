@@ -320,12 +320,20 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
 async function disableAutoupdate() {
   if (platform() === "darwin") {
     const plist = join(homedir(), "Library", "LaunchAgents", "ru.hobbyka.hub-updater.plist");
-    run("launchctl", ["bootout", `gui/${process.getuid()}`, plist], undefined, true);
+    const result = run("launchctl", ["bootout", `gui/${process.getuid()}`, plist], undefined, true);
+    if (result.error) fail(result.error.message);
+    if (launchAgentLoaded(`gui/${process.getuid()}/ru.hobbyka.hub-updater`)) fail("Не удалось выгрузить автообновление: scheduler оставил job загруженным.");
     await rm(plist, { force: true });
-  } else if (platform() === "win32") run("schtasks.exe", ["/Delete", "/F", "/TN", "Hobbyka Hub Auto Update"], undefined, true);
+  } else if (platform() === "win32") {
+    const result = run("schtasks.exe", ["/Delete", "/F", "/TN", "Hobbyka Hub Auto Update"], undefined, true);
+    if (result.error) fail(result.error.message);
+    if (windowsTaskPresent()) fail("Не удалось выгрузить автообновление: scheduler оставил задачу загруженной.");
+  }
   else if (platform() === "linux") {
     const systemd = linuxSystemd();
-    run("systemctl", [...systemd.args, "disable", "--now", "hobbyka-hub-updater.timer"], undefined, true);
+    const result = run("systemctl", [...systemd.args, "disable", "--now", "hobbyka-hub-updater.timer"], undefined, true);
+    if (result.error) fail(result.error.message);
+    if (systemdTimerPresent(systemd)) fail("Не удалось выгрузить автообновление: systemd оставил timer активным.");
     await rm(join(systemd.directory, "hobbyka-hub-updater.service"), { force: true });
     await rm(join(systemd.directory, "hobbyka-hub-updater.timer"), { force: true });
     run("systemctl", [...systemd.args, "daemon-reload"]);
@@ -473,14 +481,38 @@ function isSafeEntry(entry) { const path = entry.replaceAll("\\", "/"); return !
 function codexCommand() { return process.env.HOBBYKA_CODEX_COMMAND || (platform() === "win32" ? "codex.cmd" : "codex"); }
 function platformTarget(os = platform(), cpu = arch()) { return `${os === "win32" ? "windows" : os}-${cpu === "x64" ? "amd64" : cpu}`; }
 function resolveCodexCommand() { const command = codexCommand(); if (command.includes("/") || command.includes("\\")) return command; const result = spawnSync(platform() === "win32" ? "where.exe" : "which", [command], { encoding: "utf8" }); if (result.status !== 0) fail("Не найден исполняемый файл Codex."); return result.stdout.trim().split(/\r?\n/)[0]; }
-function launchAgentLoaded(target) { return spawnSync("launchctl", ["print", target], { stdio: "ignore" }).status === 0; }
+function launchAgentLoaded(target) {
+  const result = spawnSync("launchctl", ["print", target], { stdio: "ignore" });
+  if (result.error) fail(result.error.message);
+  return result.status === 0;
+}
+function windowsTaskPresent() {
+  const result = spawnSync("schtasks.exe", ["/Query", "/TN", "Hobbyka Hub Auto Update"], { stdio: "ignore" });
+  if (result.error) fail(result.error.message);
+  if (result.status === 0) return true;
+  if (result.status === 1) return false;
+  fail(`Не удалось определить состояние планировщика Windows: schtasks.exe завершился с кодом ${result.status}.`);
+}
+function systemdTimerPresent(systemd) {
+  const result = spawnSync("systemctl", [...systemd.args, "show", "hobbyka-hub-updater.timer", "--property=LoadState,ActiveState,UnitFileState"], { encoding: "utf8" });
+  if (result.error) fail(result.error.message);
+  if (result.status !== 0) fail(`Не удалось определить состояние systemd timer: systemctl завершился с кодом ${result.status}.`);
+  const state = Object.fromEntries((result.stdout ?? "").trim().split(/\r?\n/).filter(Boolean).map((line) => {
+    const separator = line.indexOf("=");
+    return separator > 0 ? [line.slice(0, separator), line.slice(separator + 1)] : [line, undefined];
+  }));
+  if (!["LoadState", "ActiveState", "UnitFileState"].every((key) => typeof state[key] === "string")) fail("Не удалось определить состояние systemd timer: systemctl вернул неполный ответ.");
+  if (state.LoadState === "not-found") return false;
+  if (state.LoadState === "loaded" && state.ActiveState === "inactive" && state.UnitFileState === "disabled") return false;
+  return true;
+}
 function xml(value) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
 function macPlist(node, updater, codex) { return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>ru.hobbyka.hub-updater</string><key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(updater)}</string><string>update</string><string>--quiet</string></array><key>EnvironmentVariables</key><dict><key>HOBBYKA_CODEX_COMMAND</key><string>${xml(codex)}</string></dict><key>StartInterval</key><integer>900</integer><key>RunAtLoad</key><true/></dict></plist>\n`; }
 function windowsLauncher(node, updater, codex) { const escape = (value) => value.replaceAll('"', '""'); const command = escape(`"${node}" "${updater}" update --quiet`); return `Set shell = CreateObject("Wscript.Shell")\r\nshell.Environment("Process")("HOBBYKA_CODEX_COMMAND") = "${escape(codex)}"\r\nshell.Run "${command}", 0, False\r\n`; }
 function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
 function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
 function linuxUnits(node, updater, codex, home = homedir()) { return { service: `[Unit]\nDescription=Update Hobbyka Hub plugins\nAfter=network-online.target\nWants=network-online.target\n\n[Service]\nType=oneshot\nEnvironment=${systemdQuote(`HOBBYKA_CODEX_COMMAND=${codex}`)}\nEnvironment=${systemdQuote(`HOME=${home}`)}\nExecStart=${systemdQuote(node)} ${systemdQuote(updater)} update --quiet\n`, timer: `[Unit]\nDescription=Check Hobbyka Hub plugin updates every 15 minutes\n\n[Timer]\nOnBootSec=2min\nOnUnitActiveSec=15min\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n` }; }
-function run(executable, args, cwd, allowFailure = false) { const result = spawnSync(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); }
+function run(executable, args, cwd, allowFailure = false) { const result = spawnSync(executable, args, { cwd, stdio: allowFailure ? "ignore" : "inherit" }); if (!allowFailure && result.error) fail(result.error.message); if (!allowFailure && result.status !== 0) fail(`${executable} завершился с кодом ${result.status}.`); return result; }
 function capture(executable, args) { const result = spawnSync(executable, args, { encoding: "utf8" }); if (result.error) fail(result.error.message); if (result.status !== 0) fail(result.stderr || `${executable} завершился с кодом ${result.status}.`); return result.stdout; }
 async function hubFetch(url, options, quiet = false) { let response; try { response = await fetch(url, options); } catch { if (quiet) return null; fail("ХАБ недоступен. Подключите VPN-профиль Хоббики и повторите."); } const error = identityError(response.status, response.ok ? "" : await response.clone().text()); if (error) { if (quiet) return null; fail(error); } return response; }
 function identityError(status, body) { if (status === 403) return "ХАБ не определил сотрудника. Подключите VPN-профиль Хоббики и повторите."; if (status === 502 && body.includes("Agent Chat не подтвердил профиль сотрудника")) return "VPN подключён, но Agent Chat не подтвердил профиль сотрудника."; return ""; }
