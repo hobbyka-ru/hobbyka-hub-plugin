@@ -10,6 +10,14 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { atomicCopyFile, atomicWriteFile, withMarketplaceLock } from "./marketplace-state.mjs";
 
+const SECRET_FILE_EXTENSIONS = /\.(?:key|p12|pfx)$/i;
+function isSecretFileName(name) {
+  const lower = name.toLowerCase();
+  if (lower === ".env") return true;
+  if (lower.startsWith(".env.")) return ![".env.example", ".env.sample", ".env.template"].includes(lower);
+  return lower.startsWith("id_") || SECRET_FILE_EXTENSIONS.test(lower);
+}
+
 const script = fileURLToPath(import.meta.url);
 if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
   const result = spawnSync(process.execPath, [...process.execArgv, script, ...process.argv.slice(2)], { env: { ...process.env, NODE_EXTRA_CA_CERTS: join(dirname(script), "..", "assets", "hobbyka-chat-root.crt"), HOBBYKA_HUB_CA_READY: "1" }, stdio: "inherit" });
@@ -278,7 +286,7 @@ async function submitProposal(root) {
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-proposal-"));
   try {
     const archive = join(temp, `${marker.slug}.zip`);
-    createArchive(root, archive);
+    await createArchive(root, archive);
     const form = new FormData();
     form.set("baseCommit", marker.baseCommit);
     form.set("archive", new File([await readFile(archive)], basename(archive), { type: "application/zip" }));
@@ -298,7 +306,7 @@ async function publish(directory) {
   const temp = await mkdtemp(join(tmpdir(), "hobbyka-hub-publish-"));
   try {
     const archive = join(temp, `${manifest.name}.zip`);
-    createArchive(root, archive);
+    await createArchive(root, archive);
     const form = new FormData();
     form.set("name", manifest.interface?.displayName ?? manifest.name);
     form.set("slug", manifest.name);
@@ -517,7 +525,14 @@ async function reconcileLegacyRemovals(codexRoot, installed) {
 function legacySlugs(installed, remote) { const available = new Set(remote.map((plugin) => plugin.slug)); return installed.filter((plugin) => plugin.installed && plugin.marketplaceName === "hobbyka" && available.has(plugin.name)).map((plugin) => plugin.name).sort(); }
 function listArchive(archive) { return platform() !== "win32" ? capture("unzip", ["-Z1", archive]) : capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Add-Type -AssemblyName System.IO.Compression.FileSystem; $z=[IO.Compression.ZipFile]::OpenRead($args[0]); try {$z.Entries | ForEach-Object {$_.FullName}} finally {$z.Dispose()}", archive]); }
 function extractArchive(archive, target) { if (platform() !== "win32") return run("unzip", ["-q", archive, "-d", target]); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "Expand-Archive -LiteralPath $args[0] -DestinationPath $args[1] -Force", archive, target]); }
-function createArchive(root, archive) { if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$items=Get-ChildItem -LiteralPath $args[0] -Force | Where-Object {$_.Name -notin @('.git','node_modules','.DS_Store','.hobbyka-proposal.json')}; Compress-Archive -Path $items.FullName -DestinationPath $args[1] -Force", root, archive]); }
+async function assertNoSecretFiles(root, relative = "") {
+  for (const entry of await readdir(root, { withFileTypes: true })) {
+    const path = relative ? `${relative}/${entry.name}` : entry.name;
+    if (isSecretFileName(entry.name)) fail(`В плагине найден запрещённый секретный файл: ${path}`);
+    if (entry.isDirectory() && entry.name !== ".git" && entry.name !== "node_modules") await assertNoSecretFiles(join(root, entry.name), path);
+  }
+}
+async function createArchive(root, archive) { await assertNoSecretFiles(root); if (platform() !== "win32") return run("zip", ["-qr", archive, ".", "-x", "*.DS_Store", ".git/*", "node_modules/*", ".hobbyka-proposal.json"], root); run("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "$items=Get-ChildItem -LiteralPath $args[0] -Force | Where-Object {$_.Name -notin @('.git','node_modules','.DS_Store','.hobbyka-proposal.json')}; Compress-Archive -Path $items.FullName -DestinationPath $args[1] -Force", root, archive]); }
 function isSafeEntry(entry) { const path = entry.replaceAll("\\", "/"); return !path.startsWith("/") && !/^[A-Za-z]:/.test(path) && !path.includes("\0") && !path.split("/").includes(".."); }
 function codexCommand() { return process.env.HOBBYKA_CODEX_COMMAND || (platform() === "win32" ? "codex.cmd" : "codex"); }
 function platformTarget(os = platform(), cpu = arch()) { return `${os === "win32" ? "windows" : os}-${cpu === "x64" ? "amd64" : cpu}`; }
@@ -571,6 +586,7 @@ async function selfTest() {
   const units = linuxUnits("/path/node", "/path/updater", "/path/codex", "/home/test");
   if (!units.service.includes('Environment="HOBBYKA_CODEX_COMMAND=/path/codex"') || !units.service.includes('Environment="HOME=/home/test"') || !units.service.includes('ExecStart="/path/node" "/path/updater" update --quiet') || !units.timer.includes("OnUnitActiveSec=15min")) throw new Error("Linux schedule failed");
   if (!isSafeEntry("skills/example/SKILL.md") || !isSafeEntry("skills\\example\\SKILL.md") || isSafeEntry("../secret") || isSafeEntry("..\\secret") || isSafeEntry("/secret") || isSafeEntry("\\secret") || isSafeEntry("C:/secret") || isSafeEntry("C:\\secret")) throw new Error("archive path check failed");
+  if (!isSecretFileName(".env") || !isSecretFileName("server.key") || !isSecretFileName("client.p12") || !isSecretFileName("id_ed25519") || isSecretFileName(".env.example") || isSecretFileName("public.pem")) throw new Error("secret file check failed");
   if (!createArchive.toString().includes(".hobbyka-proposal.json")) throw new Error("proposal marker exclusion failed");
   if (legacySlugs([{ name: "known", installed: true, marketplaceName: "hobbyka" }, { name: "missing", installed: true, marketplaceName: "hobbyka" }], [{ slug: "known" }]).join() !== "known") throw new Error("legacy migration selection failed");
   if (!identityError(403, "").includes("VPN-профиль Хоббики") || !identityError(502, "Agent Chat не подтвердил профиль сотрудника").includes("Agent Chat")) throw new Error("VPN identity errors failed");
