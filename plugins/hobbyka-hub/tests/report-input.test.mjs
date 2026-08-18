@@ -27,9 +27,32 @@ test("reads Cyrillic report text from a UTF-8 body file", () => {
   }
 });
 
+test("rejects stdin larger than 32 KB instead of silently truncating it", () => {
+  const oversized = "A".repeat(32768) + " ";
+  assert.throws(
+    () => execFileSync(process.execPath, [join(root, "bin", "hobbyka-hub.mjs"), "report-bug", "--stdin"], {
+      encoding: "utf8",
+      input: oversized,
+      env: { ...process.env, HOBBYKA_HUB_CA_READY: "1" },
+    }),
+    (error) => {
+      assert.equal(error.status, 2);
+      const out = JSON.parse(error.stdout);
+      assert.equal(out.status, "failed");
+      assert.equal(out.result.code, "invalid_report");
+      return true;
+    },
+  );
+});
+
 test("sends the reporting Codex thread so a missing Inbox can be bound", async () => {
-  const operation = "550e8400-e29b-41d4-a716-446655440000";
   const thread = "550e8400-e29b-41d4-a716-446655440001";
+  const preview = JSON.parse(execFileSync(process.execPath, [join(root, "bin", "hobbyka-hub.mjs"), "report-bug", "--stdin"], {
+    encoding: "utf8",
+    input: "Баг",
+    env: { ...process.env, HOBBYKA_HUB_CA_READY: "1" },
+  }));
+  const operation = preview.effects.operation_id;
   let requestBody;
   const server = createServer((request, response) => {
     let body = "";

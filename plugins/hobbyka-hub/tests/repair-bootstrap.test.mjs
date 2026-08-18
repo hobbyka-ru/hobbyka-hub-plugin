@@ -21,7 +21,7 @@ test("normal install immediately reconciles legacy Hobbyka plugins", () => {
 test("install completes post-update before Codex snapshots the plugin cache", () => {
   const install = source.slice(source.indexOf("async function install("), source.indexOf("async function installAndReconcile("));
   const hook = install.indexOf("await runPostUpdateHook(pluginRoot)");
-  const marketplace = install.indexOf("await configureMarketplace(codexRoot)");
+  const marketplace = install.indexOf("await configureMarketplace(codexRoot,");
   const add = install.indexOf('run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`])');
 
   assert.ok(hook >= 0 && hook < marketplace && marketplace < add);
@@ -63,8 +63,9 @@ test("self-test skips only Unix executable bits on Windows", () => {
   assert.match(source, /await runPostUpdateHook\(fixture, marker\)/);
 });
 
-test("self-update reads the manifest from the downloaded archive", () => {
-  assert.doesNotMatch(source, /raw\.githubusercontent\.com/);
-  assert.match(source, /const latest = JSON\.parse\(await readFile\(join\(source, "\.codex-plugin", "plugin\.json"\), "utf8"\)\)/);
-  assert.ok(source.indexOf("archive/refs/heads/main.zip") < source.indexOf("const latest = JSON.parse"));
+test("self-update pins the manifest and archive to one immutable commit", () => {
+  assert.match(source, /publicHubAPI.*commits\/main/);
+  assert.match(source, /raw\.githubusercontent\.com/);
+  assert.match(source, /archive\/\$\{revision\}\.zip/);
+  assert.match(source, /archiveManifest\.version !== latest\.version/);
 });
