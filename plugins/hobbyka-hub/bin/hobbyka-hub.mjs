@@ -483,6 +483,7 @@ async function copyUpdater(pluginRoot) {
   await mkdir(join(root, "assets"), { recursive: true });
   await mkdir(join(root, ".codex-plugin"), { recursive: true });
   await atomicCopyFile(join(pluginRoot, "bin", "hobbyka-hub.mjs"), join(root, "bin", "hobbyka-hub.mjs"));
+  await atomicCopyFile(join(pluginRoot, "bin", "marketplace-state.mjs"), join(root, "bin", "marketplace-state.mjs"));
   await atomicCopyFile(join(pluginRoot, "assets", "hobbyka-chat-root.crt"), join(root, "assets", "hobbyka-chat-root.crt"));
   await atomicCopyFile(join(pluginRoot, ".codex-plugin", "plugin.json"), join(root, ".codex-plugin", "plugin.json"));
   await chmod(join(root, "bin", "hobbyka-hub.mjs"), 0o755);
@@ -675,7 +676,7 @@ function systemdTimerPresent(systemd) {
   return true;
 }
 function xml(value) { return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }
-function macPlist(node, updater, codex) { return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>ru.hobbyka.hub-updater</string><key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(updater)}</string><string>update</string><string>--quiet</string></array><key>EnvironmentVariables</key><dict><key>HOBBYKA_CODEX_COMMAND</key><string>${xml(codex)}</string></dict><key>StartInterval</key><integer>900</integer><key>RunAtLoad</key><true/></dict></plist>\n`; }
+function macPlist(node, updater, codex) { return `<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict><key>Label</key><string>ru.hobbyka.hub-updater</string><key>ProgramArguments</key><array><string>${xml(node)}</string><string>${xml(updater)}</string><string>update</string><string>--quiet</string></array><key>EnvironmentVariables</key><dict><key>HOBBYKA_CODEX_COMMAND</key><string>${xml(codex)}</string><key>PATH</key><string>${xml(`${dirname(node)}:/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin`)}</string></dict><key>StartInterval</key><integer>900</integer><key>RunAtLoad</key><true/></dict></plist>\n`; }
 function windowsLauncher(node, updater, codex) { const escape = (value) => value.replaceAll('"', '""'); const command = escape(`"${node}" "${updater}" update --quiet`); return `Set shell = CreateObject("Wscript.Shell")\r\nshell.Environment("Process")("HOBBYKA_CODEX_COMMAND") = "${escape(codex)}"\r\nshell.Run "${command}", 0, False\r\n`; }
 function linuxSystemd() { const system = process.getuid?.() === 0; return { directory: system ? "/etc/systemd/system" : join(homedir(), ".config", "systemd", "user"), args: system ? [] : ["--user"] }; }
 function systemdQuote(value) { return `"${value.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`; }
