@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -23,6 +23,7 @@ test("bootstrap schedules the updater from the just-installed Hub plugin (CR-334
     await mkdir(join(source, "assets"), { recursive: true });
     await writeFile(join(source, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "hobbyka-hub", version: "9.9.9", description: "fresh" }), "utf8");
     await writeFile(join(source, "bin", "hobbyka-hub.mjs"), "#!/usr/bin/env node\n// CR-334-fresh-managed-updater\n", { mode: 0o755 });
+    await writeFile(join(source, "bin", "marketplace-state.mjs"), "// managed updater dependency\n", "utf8");
     await writeFile(join(source, "assets", "hobbyka-chat-root.crt"), "fresh certificate\n", "utf8");
     const packed = await new Promise((resolve) => {
       const child = spawn("zip", ["-qr", archive, "."], { cwd: source, stdio: ["ignore", "ignore", "pipe"] });
@@ -86,6 +87,10 @@ esac
 
     assert.equal(result.status, 0, result.output);
     assert.match(await readFile(join(fixture, ".codex", "hobbyka-hub-updater", "bin", "hobbyka-hub.mjs"), "utf8"), /CR-334-fresh-managed-updater/);
+    assert.match(await readFile(join(fixture, ".codex", "hobbyka-hub-updater", "bin", "marketplace-state.mjs"), "utf8"), /managed updater dependency/);
+    const plist = await readFile(join(fixture, "Library", "LaunchAgents", "ru.hobbyka.hub-updater.plist"), "utf8");
+    assert.match(plist, /<key>PATH<\/key>/);
+    assert.ok(plist.includes(dirname(process.execPath)));
     assert.match(await readFile(launchctlTrace, "utf8"), /bootstrap/);
   } finally {
     await rm(fixture, { recursive: true, force: true });

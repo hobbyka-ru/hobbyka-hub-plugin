@@ -26,6 +26,7 @@ test("self-update preserves a loaded macOS LaunchAgent without booting out its o
     await mkdir(join(publicRoot, "plugins", "hobbyka-hub", "assets"), { recursive: true });
     await writeFile(join(publicRoot, "plugins", "hobbyka-hub", ".codex-plugin", "plugin.json"), JSON.stringify({ name: "hobbyka-hub", version: "2.0.0", description: "public update" }), "utf8");
     await writeFile(join(publicRoot, "plugins", "hobbyka-hub", "bin", "hobbyka-hub.mjs"), "#!/usr/bin/env node\n// CR-335-public-update\n", { mode: 0o755 });
+    await writeFile(join(publicRoot, "plugins", "hobbyka-hub", "bin", "marketplace-state.mjs"), "// managed updater dependency\n", "utf8");
     await writeFile(join(publicRoot, "plugins", "hobbyka-hub", "assets", "hobbyka-chat-root.crt"), "public certificate\n", "utf8");
     const packed = spawnSync("zip", ["-qr", archive, "hobbyka-hub-plugin-main"], { cwd: fixture, encoding: "utf8" });
     assert.equal(packed.status, 0, packed.stderr);

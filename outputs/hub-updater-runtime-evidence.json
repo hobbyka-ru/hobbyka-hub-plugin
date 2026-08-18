@@ -1,0 +1,36 @@
+{
+  "classification": "FIX_PROVEN",
+  "reported_symptoms": [
+    "LaunchAgent ru.hobbyka.hub-updater exited with status 1",
+    "managed updater failed with ERR_MODULE_NOT_FOUND for bin/marketplace-state.mjs",
+    "launchd's default PATH could not run npm-based post-update hooks"
+  ],
+  "red": [
+    {
+      "command": "node --test plugins/hobbyka-hub/tests/updater-bootstrap.test.mjs",
+      "exit_code": 1,
+      "signal": "managed bin/marketplace-state.mjs was absent"
+    },
+    {
+      "command": "launchd-equivalent minimal environment update",
+      "exit_code": 1,
+      "signal": "post-update child process exited with status 1"
+    }
+  ],
+  "green": [
+    {
+      "command": "node --test plugins/hobbyka-hub/tests/updater-bootstrap.test.mjs",
+      "exit_code": 0
+    },
+    {
+      "command": "node --test plugins/hobbyka-hub/tests/*.test.mjs",
+      "exit_code": 0,
+      "tests": 43
+    },
+    {
+      "command": "launchctl kickstart gui/501/ru.hobbyka.hub-updater",
+      "exit_code": 0,
+      "live_result": "LaunchAgent last exit code 0"
+    }
+  ]
+}
