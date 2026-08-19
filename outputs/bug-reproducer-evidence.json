@@ -8,18 +8,18 @@
   "before": {
     "schema_version": 1,
     "label": "reproduced",
-    "captured_at": "2026-08-14T10:30:42.001896+00:00",
+    "captured_at": "2026-08-19T15:00:47.024075+00:00",
     "command": [
       "node",
       "--test",
-      "/tmp/hub-windows-repair-regression.test.mjs"
+      "plugins/hobbyka-hub/tests/windows-codex-command.test.mjs"
     ],
-    "cwd": "/private/tmp/hub-windows-red-20260814",
+    "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819",
     "runtime": "Python 3.9.6 on Darwin arm64",
-    "duration_ms": 60.266,
+    "duration_ms": 79.683,
     "exit_code": 1,
     "timed_out": false,
-    "stdout": "\u2716 Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 36.4785\n\n\u2716 failing tests:\n\ntest at ../hub-windows-repair-regression.test.mjs:8:1\n\u2716 Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)\n  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n  \n    assert.ok(definition)\n  \n      at TestContext.<anonymous> (file:///private/tmp/hub-windows-repair-regression.test.mjs:10:10)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1106:25)\n      at Test.start (node:internal/test_runner/test:1003:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: undefined,\n    expected: true,\n    operator: '==',\n    diff: 'simple'\n  }\n",
+    "stdout": "\u2716 Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.728292ms)\n\u2716 Windows Task Scheduler uses the guarded command shell path (0.194292ms)\n\u2716 Windows auto-update task safely carries a quoted launcher path (0.210458ms)\n\u2139 tests 3\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 3\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 44.616875\n\n\u2716 failing tests:\n\ntest at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7:1\n\u2716 Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.728292ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n  + actual - expected\n  \n    [\n      'cmd.exe',\n      [\n        '/d',\n        '/s',\n        '/c',\n  +     '\"\"codex.cmd\" \"plugin\" \"list\" \"--json\"\"'\n  -     '\"codex.cmd\" \"plugin\" \"list\" \"--json\"'\n      ]\n    ]\n  \n      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:29:10)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1106:25)\n      at Test.start (node:internal/test_runner/test:1003:17)\n      at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: [ 'cmd.exe', [ '/d', '/s', '/c', '\"\"codex.cmd\" \"plugin\" \"list\" \"--json\"\"' ] ],\n    expected: [ 'cmd.exe', [ '/d', '/s', '/c', '\"codex.cmd\" \"plugin\" \"list\" \"--json\"' ] ],\n    operator: 'deepStrictEqual',\n    diff: 'simple'\n  }\n\ntest at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:37:1\n\u2716 Windows Task Scheduler uses the guarded command shell path (0.194292ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  \n  true !== false\n  \n      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:44:10)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1106:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)\n      at Test.postRun (node:internal/test_runner/test:1235:19)\n      at Test.run (node:internal/test_runner/test:1163:12)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: true,\n    expected: false,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n\ntest at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:50:1\n\u2716 Windows auto-update task safely carries a quoted launcher path (0.210458ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  + actual - expected\n  \n  + 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand JgAgACcAdwBzAGMAcgBpAHAAdAAuAGUAeABlACcAIAAnAEMAOgBcAFUAcwBlAHIAcwBcAE8AJwAnAEIAcgBpAGUAbgAgAE4AYQBtAGUAXAAuAGMAbwBkAGUAeABcAGgAbwBiAGIAeQBrAGEALQBoAHUAYgAtAHUAcABkAGEAdABlAHIAXAB1AHAAZABhAHQAZQAtAGgAaQBkAGQAZQBuAC4AdgBiAHMAJwA='\n  - `wscript.exe \"C:\\\\Users\\\\O'Brien Name\\\\.codex\\\\hobbyka-hub-updater\\\\update-hidden.vbs\"`\n  \n      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:55:10)\n      at Test.runInAsyncScope (node:async_hooks:214:14)\n      at Test.run (node:internal/test_runner/test:1106:25)\n      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)\n      at Test.postRun (node:internal/test_runner/test:1235:19)\n      at Test.run (node:internal/test_runner/test:1163:12)\n      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand JgAgACcAdwBzAGMAcgBpAHAAdAAuAGUAeABlACcAIAAnAEMAOgBcAFUAcwBlAHIAcwBcAE8AJwAnAEIAcgBpAGUAbgAgAE4AYQBtAGUAXAAuAGMAbwBkAGUAeABcAGgAbwBiAGIAeQBrAGEALQBoAHUAYgAtAHUAcABkAGEAdABlAHIAXAB1AHAAZABhAHQAZQAtAGgAaQBkAGQAZQBuAC4AdgBiAHMAJwA=',\n    expected: `wscript.exe \"C:\\\\Users\\\\O'Brien Name\\\\.codex\\\\hobbyka-hub-updater\\\\update-hidden.vbs\"`,\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
     "stderr": "",
     "stdout_truncated": false,
     "stderr_truncated": false,
@@ -28,18 +28,18 @@
   "after": {
     "schema_version": 1,
     "label": "fixed",
-    "captured_at": "2026-08-14T10:30:46.319692+00:00",
+    "captured_at": "2026-08-19T15:01:15.266567+00:00",
     "command": [
       "node",
       "--test",
-      "/tmp/hub-windows-repair-regression.test.mjs"
+      "plugins/hobbyka-hub/tests/windows-codex-command.test.mjs"
     ],
-    "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814",
+    "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819",
     "runtime": "Python 3.9.6 on Darwin arm64",
-    "duration_ms": 77.085,
+    "duration_ms": 68.17,
     "exit_code": 0,
     "timed_out": false,
-    "stdout": "\u2714 Windows repair uses a shell only for schtasks and skips only Unix mode checks (0.982333ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 1\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 45.294708\n",
+    "stdout": "\u2714 Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.200375ms)\n\u2714 Windows Task Scheduler runs directly without cmd.exe quoting (0.250959ms)\n\u2714 Windows auto-update task safely carries a quoted launcher path (0.237917ms)\n\u2139 tests 3\n\u2139 suites 0\n\u2139 pass 3\n\u2139 fail 0\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 39.473208\n",
     "stderr": "",
     "stdout_truncated": false,
     "stderr_truncated": false,
