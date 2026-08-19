@@ -4,29 +4,28 @@
 
 > The same reproducer changed from failing to passing and broader checks passed.
 
-**Project:** Hobbyka Hub
-**Bug:** Windows repair cannot create its task and self-test checks Unix mode bits
-**Environment:** Reported on Windows 10.0.26200.8973 x64, Node.js 24.19.0, Hobbyka Hub 0.4.29. Deterministic code-path regression and broader suite run on macOS because no reachable Windows runner was available.
-**Generated:** 2026-08-14
+**Project:** hobbyka-hub-plugin
+**Bug:** Windows Hub cannot invoke codex.cmd or register auto-update
+**Environment:** Reported on Windows, Node.js 24.19.0, Codex Desktop 26.814.5517.0, codex-cli 0.148.0-alpha.15, Hobbyka Hub 0.4.36; regression executed with Node.js test runner on macOS.
+**Generated:** 2026-08-19
 
 ## Original report
 
-On Windows 10 with Node.js 24.19.0 and Hobbyka Hub 0.4.29, repair fails with spawnSync schtasks.exe EPERM even when elevated, while direct schtasks.exe succeeds. After manually creating the task, self-test fails with executable script restoration failed although Windows intentionally skips chmod restoration.
+Hobbyka Hub 0.4.36 fails to install a plugin through codex.cmd, then exceeds the 261-character schtasks /TR limit while enabling auto-update.
 
 | Contract | Expected | Actual |
 |---|---|---|
-| Observed behavior | Windows repair creates Hobbyka Hub Auto Update without a manual workaround, and self-test validates only platform-applicable behavior while still running its post-update hook check. | Node directly spawns schtasks.exe and receives EPERM; self-test then requires Unix executable mode bits even though restoreExecutableScripts is a no-op on Windows. |
+| Observed behavior | Windows invokes the Codex cmd shim, registers the plugin, creates the 15-minute auto-update task and exits successfully. | cmd.exe preserved an extra outer quote pair around codex.cmd, and the PowerShell EncodedCommand used for /TR exceeded 261 characters. |
 
 ## Minimal reproduction
 
-A focused regression requires schtasks.exe, but not unrelated native executables, to use the existing guarded Windows command-shell path and requires only the Unix mode assertion to be skipped on Windows while the post-update hook remains tested.
+The focused test evaluates the real command builders and captures the exact cmd.exe argv, schtasks dispatch decision and /TR action.
 
-**Confirming signal:** Both focused assertions fail on 0.4.29: there is no schtasks.exe shell route and the Unix executable-bit assertion is unconditional.
+**Confirming signal:** Before the fix, cmd.exe received double outer quotes, schtasks was routed through cmd.exe and the generated EncodedCommand was longer than the supported task action.
 
 ### Reproduction files
 
-- [windows-codex-command.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:21) — Exact Windows scheduler shell-routing regression.
-- [repair-bootstrap.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814/plugins/hobbyka-hub/tests/repair-bootstrap.test.mjs:52) — Windows self-test platform-contract regression.
+- [windows-codex-command.test.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7) — Focused Windows command and scheduler regression.
 
 ## Red to green evidence
 
@@ -34,41 +33,97 @@ A focused regression requires schtasks.exe, but not unrelated native executables
 |---|---:|---:|
 | Exit code | 1 | 0 |
 | Timed out | False | False |
-| Duration | 60.266 ms | 77.085 ms |
+| Duration | 79.683 ms | 68.17 ms |
 | Same command | — | True |
 | Broader suite | — | passed |
 
 ### Before — failing evidence
 
 ```text
-✖ Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)
-ℹ tests 1
+✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.728292ms)
+✖ Windows Task Scheduler uses the guarded command shell path (0.194292ms)
+✖ Windows auto-update task safely carries a quoted launcher path (0.210458ms)
+ℹ tests 3
 ℹ suites 0
 ℹ pass 0
-ℹ fail 1
+ℹ fail 3
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 36.4785
+ℹ duration_ms 44.616875
 
 ✖ failing tests:
 
-test at ../hub-windows-repair-regression.test.mjs:8:1
-✖ Windows repair uses a shell only for schtasks and skips only Unix mode checks (3.565792ms)
-  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+test at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:7:1
+✖ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.728292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
 
-    assert.ok(definition)
-  
-      at TestContext.<anonymous> (file:///private/tmp/hub-windows-repair-regression.test.mjs:10:10)
+    [
+      'cmd.exe',
+      [
+        '/d',
+        '/s',
+        '/c',
+  +     '""codex.cmd" "plugin" "list" "--json""'
+  -     '"codex.cmd" "plugin" "list" "--json"'
+      ]
+    ]
+
+      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:29:10)
       at Test.runInAsyncScope (node:async_hooks:214:14)
       at Test.run (node:internal/test_runner/test:1106:25)
       at Test.start (node:internal/test_runner/test:1003:17)
       at startSubtestAfterBootstrap (node:internal/test_runner/harness:358:17) {
     generatedMessage: true,
     code: 'ERR_ASSERTION',
-    actual: undefined,
-    expected: true,
-    operator: '==',
+    actual: [ 'cmd.exe', [ '/d', '/s', '/c', '""codex.cmd" "plugin" "list" "--json""' ] ],
+    expected: [ 'cmd.exe', [ '/d', '/s', '/c', '"codex.cmd" "plugin" "list" "--json"' ] ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:37:1
+✖ Windows Task Scheduler uses the guarded command shell path (0.194292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+
+  true !== false
+
+      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:44:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: true,
+    expected: false,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:50:1
+✖ Windows auto-update task safely carries a quoted launcher path (0.210458ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+
+  + 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand JgAgACcAdwBzAGMAcgBpAHAAdAAuAGUAeABlACcAIAAnAEMAOgBcAFUAcwBlAHIAcwBcAE8AJwAnAEIAcgBpAGUAbgAgAE4AYQBtAGUAXAAuAGMAbwBkAGUAeABcAGgAbwBiAGIAeQBrAGEALQBoAHUAYgAtAHUAcABkAGEAdABlAHIAXAB1AHAAZABhAHQAZQAtAGgAaQBkAGQAZQBuAC4AdgBiAHMAJwA='
+  - ˋwscript.exe "C:\\Users\\O'Brien Name\\.codex\\hobbyka-hub-updater\\update-hidden.vbs"ˋ
+
+      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/tests/windows-codex-command.test.mjs:55:10)
+      at Test.runInAsyncScope (node:async_hooks:214:14)
+      at Test.run (node:internal/test_runner/test:1106:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:788:18)
+      at Test.postRun (node:internal/test_runner/test:1235:19)
+      at Test.run (node:internal/test_runner/test:1163:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:788:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand JgAgACcAdwBzAGMAcgBpAHAAdAAuAGUAeABlACcAIAAnAEMAOgBcAFUAcwBlAHIAcwBcAE8AJwAnAEIAcgBpAGUAbgAgAE4AYQBtAGUAXAAuAGMAbwBkAGUAeABcAGgAbwBiAGIAeQBrAGEALQBoAHUAYgAtAHUAcABkAGEAdABlAHIAXAB1AHAAZABhAHQAZQAtAGgAaQBkAGQAZQBuAC4AdgBiAHMAJwA=',
+    expected: ˋwscript.exe "C:\\Users\\O'Brien Name\\.codex\\hobbyka-hub-updater\\update-hidden.vbs"ˋ,
+    operator: 'strictEqual',
     diff: 'simple'
   }
 ```
@@ -76,45 +131,45 @@ test at ../hub-windows-repair-regression.test.mjs:8:1
 ### After — fixed evidence
 
 ```text
-✔ Windows repair uses a shell only for schtasks and skips only Unix mode checks (0.982333ms)
-ℹ tests 1
+✔ Windows Codex cmd shim uses cmd.exe without unsafe shell arguments (1.200375ms)
+✔ Windows Task Scheduler runs directly without cmd.exe quoting (0.250959ms)
+✔ Windows auto-update task safely carries a quoted launcher path (0.237917ms)
+ℹ tests 3
 ℹ suites 0
-ℹ pass 1
+ℹ pass 3
 ℹ fail 0
 ℹ cancelled 0
 ℹ skipped 0
 ℹ todo 0
-ℹ duration_ms 45.294708
+ℹ duration_ms 39.473208
 ```
 
 ## Root cause
 
-The shared launcher routed only .cmd and .bat shims through cmd.exe, leaving schtasks.exe on the direct Node spawn path that fails in the reported environment. Separately, self-test ignored the same Windows no-op contract implemented by restoreExecutableScripts.
+The shared Windows process wrapper added an outer quote pair after already quoting every cmd argument. It also treated schtasks.exe as a shell script, which forced its internally quoted /TR action through the restrictive command builder; the previous workaround expanded that action into a long UTF-16 Base64 PowerShell command.
 
 ## Applied fix
 
-Route only .cmd, .bat, and exact schtasks.exe through the existing safely quoted cmd.exe path; keep all other native executables direct. Guard only the Unix executable-bit restoration assertion on Windows and retain the post-update hook test. Bump Hobbyka Hub to 0.4.30.
+Keep cmd.exe only for .cmd/.bat shims without the redundant outer pair; run schtasks.exe directly; use the existing hidden VBS launcher as the short task action.
 
-**Why this is causal:** The scheduler command now avoids the exact direct spawn that returned EPERM without broadening shell execution, and self-test no longer asserts behavior that production deliberately omits on Windows.
+**Why this is causal:** The same three assertions now observe the argv and /TR forms required by the failing Windows tools, while unsafe cmd metacharacters remain rejected.
 
 ### Production fix files
 
-- [hobbyka-hub.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814/plugins/hobbyka-hub/bin/hobbyka-hub.mjs:438) — Guarded schtasks.exe shell route and platform-correct self-test.
-- [plugin.json](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-repair-selftest-20260814/plugins/hobbyka-hub/.codex-plugin/plugin.json:3) — Hobbyka Hub 0.4.30 release version.
+- [hobbyka-hub.mjs](/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-20260819/plugins/hobbyka-hub/bin/hobbyka-hub.mjs:684) — Minimal Windows process and task action correction.
 
 ## Verification
 
 | Check | Status | Evidence |
 |---|---|---|
-| Focused regression | ✅ passed | The same command changed from exit 1 to exit 0. |
-| Hub test suite | ✅ passed | All ten tests passed. |
+| Focused regression | ✅ passed | The same test changed from 3 failures to 3 passes. |
+| Hub test suite | ✅ passed | 43 tests passed. |
 | Hub self-test | ✅ passed | hobbyka-hub self-test: ok. |
-| Syntax and diff checks | ✅ passed | node --check and git diff --check completed successfully. |
 
 ## Reproduce
 
 ```bash
-node --test /tmp/hub-windows-repair-regression.test.mjs
+node --test plugins/hobbyka-hub/tests/windows-codex-command.test.mjs
 ```
 ```bash
 node --test plugins/hobbyka-hub/tests/*.test.mjs
@@ -122,24 +177,18 @@ node --test plugins/hobbyka-hub/tests/*.test.mjs
 ```bash
 node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test
 ```
-```bash
-node --check plugins/hobbyka-hub/bin/hobbyka-hub.mjs
-```
-```bash
-git diff --check
-```
 
 ## Limitations
 
-- No reachable Windows runner was available; Elvira must rerun the official repair script to confirm Task Scheduler behavior on the original machine.
+- Real Windows acceptance is required after publishing 0.4.37.
 
 ## Residual risks
 
-- If the reported endpoint policy blocks schtasks.exe beneath cmd.exe as well, the Windows rerun will remain failing and the exact policy event will be needed.
+- No residual risks supplied.
 
 ## Notes
 
-- No dependency was added. Existing command argument validation remains in force and unrelated native executables continue to bypass the shell.
+- No dependency or public command syntax changed.
 
 ---
 
