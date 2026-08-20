@@ -40,6 +40,21 @@ description: "Use when Codex наблюдает ошибку, сбой, неве
 3. Успех подтверждай только при `status: ok` и возвращённом `bug:UUID`.
 4. При `outcome_unknown` не повторяй запись с новым UUID. Сохрани все `operation:UUID`; не пытайся читать баг через Hub.
 
-После отправки воспроизведи сбой красным тестом, найди первопричину, внеси минимальное причинное исправление и получи зелёный тест. Проверь реальный пользовательский путь. Если доступен Agent Chat, оставь доказательства результатом команды `hchat comment bug-report:UUID --stdin --confirm`, используя UUID возвращённого `bug:UUID`. Если исходный код, среда или права недоступны, тем же комментарием зафиксируй точный блокер и уже выполненные проверки.
+После отправки воспроизведи сбой красным тестом, найди первопричину, внеси минимальное причинное исправление и получи зелёный тест. Проверь реальный пользовательский путь.
+
+## Комментарий с результатом
+
+Не вызывай голую команду `hchat`: установщик не добавляет её в системный `PATH`. Если `$hobbyka-agent-chat` недоступен, сначала установи его тем же Hub:
+
+```text
+node <plugin-root>/bin/hobbyka-hub.mjs install hobbyka-agent-chat
+```
+
+Затем используй поставляемый с Agent Chat запускатель:
+
+- macOS/Linux: `sh ~/.codex/hobbyka-hub-marketplace/plugins/hobbyka-agent-chat/scripts/hchat`;
+- Windows: `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File "$env:USERPROFILE\.codex\hobbyka-hub-marketplace\plugins\hobbyka-agent-chat\scripts\hchat.ps1"`.
+
+Передай запускателю `comment bug-report:UUID --stdin`, используя UUID возвращённого `bug:UUID`. Сначала выполни preview без `--confirm`, затем повтори тот же комментарий с `--confirm`. На Windows храни комментарий в UTF-8-файле и передавай его во вложенный `powershell.exe` после установки `$OutputEncoding = [Text.UTF8Encoding]::new($false)`, чтобы кириллица не повредилась. Если исходный код, среда или права недоступны, комментарием зафиксируй точный блокер и уже выполненные проверки.
 
 Hobbyka Hub только создаёт отчёт. Чтение, комментарии и подтверждение исправления выполняются через Agent Chat; статус `resolved` ставит только отправитель после собственной проверки.
