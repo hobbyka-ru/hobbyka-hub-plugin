@@ -1,6 +1,6 @@
 {
   "name": "hobbyka-hub",
-  "version": "0.4.38",
+  "version": "0.4.39",
   "description": "Установка и публикация плагинов Hobbyka Hub, предложения изменений, ошибки и идеи.",
   "author": { "name": "Hobbyka" },
   "skills": "./skills/",
@@ -11,9 +11,9 @@
     "developerName": "Hobbyka",
     "category": "Productivity",
     "capabilities": ["Read", "Write"],
-    "websiteURL": "https://10.8.1.0:8443/plugins/hobbyka-agent-chat",
-    "privacyPolicyURL": "https://github.com/hobbyka-ru/plugins/blob/main/hobbyka/hobbyka-agent-chat/PRIVACY.md",
-    "termsOfServiceURL": "https://github.com/hobbyka-ru/plugins/blob/main/hobbyka/hobbyka-agent-chat/TERMS.md",
+    "websiteURL": "https://10.8.1.0:8443/plugins/hobbyka-hub",
+    "privacyPolicyURL": "https://github.com/hobbyka-ru/hobbyka-hub-plugin/blob/main/plugins/hobbyka-hub/PRIVACY.md",
+    "termsOfServiceURL": "https://github.com/hobbyka-ru/hobbyka-hub-plugin/blob/main/plugins/hobbyka-hub/TERMS.md",
     "brandColor": "#FBC40A",
     "defaultPrompt": [
       "Установи плагин <slug> из Hobbyka Hub.",

@@ -17,6 +17,8 @@ description: Use when сотрудник просит установить, об
 
 Установка автоматически включает проверку обновлений каждые 15 минут. Обновляются все установленные плагины marketplace `hobbyka-hub`, которые Codex возвращает через `plugin list`. После обновления ХАБ запускает необязательный `.codex-plugin/post-update.mjs`, чтобы плагин заменил и перезапустил собственные фоновые службы. На macOS используется пользовательский LaunchAgent, на Windows — Task Scheduler, на Linux — systemd timer.
 
+На Windows установка также создаёт скрытую ежедневную задачу `Hobbyka Plugin Runtime Check` на 06:00 МСК. Она проверяет шесть официальных плагинов, сохраняет очищенный JSON-отчёт в `%LOCALAPPDATA%\Hobbyka\PluginChecks` и отправляет через Hub только новую подтверждённую ошибку. Отсутствующая конфигурация и недоступная сеть имеют статус `blocked` и не превращаются в баги плагинов.
+
 Ручная проверка: `node <plugin-root>/bin/hobbyka-hub.mjs update`.
 
 Восстановление старой установки без удаления пользовательских данных:
@@ -25,6 +27,24 @@ description: Use when сотрудник просит установить, об
 включает единственный фоновый обновлятор Hobbyka Hub.
 
 Управление фоновым обновлением: `node <plugin-root>/bin/hobbyka-hub.mjs autoupdate enable|disable`.
+
+## Runtime-проверка
+
+Каталог без запуска:
+
+```text
+node <plugin-root>/bin/hobbyka-hub.mjs verify --list --json
+```
+
+Режимы:
+
+```text
+node <plugin-root>/bin/hobbyka-hub.mjs verify --mode daily --json
+node <plugin-root>/bin/hobbyka-hub.mjs verify --mode full --json
+node <plugin-root>/bin/hobbyka-hub.mjs verify --mode post-update --plugin <slug> --json
+```
+
+`daily` не создаёт новые CRM-сущности и коммерческие предложения. `full` и `post-update` выполняют живые записи только в объектах с префиксом `[AUTO-CODEX-WIN]` и только когда `liveWrites` явно включён в локальном owner-only `config.json`. Не переносить этот config в репозиторий и не выводить его содержимое.
 
 ## Публикация
 

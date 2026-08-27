@@ -3,12 +3,13 @@ import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { access, chmod, cp, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat, writeFile } from "node:fs/promises";
 import { arch, homedir, platform, tmpdir } from "node:os";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Readable, Transform } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { atomicCopyFile, atomicWriteFile, withMarketplaceLock } from "./marketplace-state.mjs";
+import { RUNTIME_TASK_NAME, runRuntimeVerification, windowsRuntimeTaskXML, windowsVerifyLauncher } from "./runtime-check.mjs";
 
 const SECRET_FILE_EXTENSIONS = /\.(?:key|p12|pfx)$/i;
 function isSecretFileName(name) {
@@ -53,8 +54,14 @@ else if (command === "update") await withMarketplaceLock(marketplaceRoot, () => 
 else if (command === "repair") await withMarketplaceLock(marketplaceRoot, () => repair());
 else if (command === "autoupdate" && args[0] === "enable") await withMarketplaceLock(marketplaceRoot, () => enableAutoupdate());
 else if (command === "autoupdate" && args[0] === "disable") await withMarketplaceLock(marketplaceRoot, () => disableAutoupdate());
+else if (command === "verify") {
+  try {
+    const verification = await runRuntimeVerification(args);
+    process.exitCode = verification.exitCode;
+  } catch (error) { fail(error.message); }
+}
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable\n  hobbyka-hub verify --mode full|daily|post-update [--plugin SLUG] [--list] [--json]");
 
 async function submitReport(args, kind) {
   const parsed = parseReportArgs(args);
@@ -264,6 +271,10 @@ async function install(slug, { update = false, quiet = false } = {}) {
     const confirmation = await hubFetch(`${base}/api/downloads/${downloadId}/confirm`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ installed: true }) });
     if (!confirmation.ok) fail(`Плагин установлен, но Hub не подтвердил регистрацию: ${await confirmation.text()}`);
     if (!update) await enableAutoupdate(true, slug === "hobbyka-hub" ? pluginRoot : undefined);
+    if (update && platform() === "win32") {
+      try { await verifyUpdatedPlugin(slug); }
+      catch (error) { await restorePreviousPlugin(codexRoot, slug, previousRoot, pluginRoot); throw error; }
+    }
     await cleanupPluginRoots(codexRoot, slug, pluginRoot, previousRoot);
     if (!quiet) console.log(`Плагин ${slug} ${update ? "обновлён" : "установлен"} и подтверждён в Hub.`);
     return true;
@@ -356,6 +367,10 @@ async function updatePublicHub(quiet) {
     await writeMarketplace(codexRoot, { "hobbyka-hub": pluginRef(pluginRoot) });
     run(codexCommand(), ["plugin", "add", "hobbyka-hub@hobbyka-hub"]);
     await enableAutoupdate(true, pluginRoot);
+    if (platform() === "win32") {
+      try { await verifyUpdatedPlugin("hobbyka-hub"); }
+      catch (error) { await restorePreviousPlugin(codexRoot, "hobbyka-hub", currentRoot, pluginRoot); throw error; }
+    }
     await cleanupPluginRoots(codexRoot, "hobbyka-hub", pluginRoot, currentRoot);
     if (!quiet) console.log(`Hobbyka Hub обновлён до ${latest.version}.`);
     return true;
@@ -442,6 +457,13 @@ async function enableAutoupdate(quiet = false, sourceRoot = dirname(dirname(scri
     const launcher = join(dirname(stableScript), "update-hidden.vbs");
     await atomicWriteFile(launcher, windowsLauncher(process.execPath, stableScript, codex));
     run("schtasks.exe", ["/Create", "/F", "/TN", "Hobbyka Hub Auto Update", "/SC", "MINUTE", "/MO", "15", "/TR", windowsTaskAction(launcher)]);
+    const verifyLauncher = join(dirname(stableScript), "verify-hidden.vbs");
+    const taskXML = join(dirname(stableScript), "runtime-check-task.xml");
+    const sid = capture("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", "[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value"]).trim();
+    if (!/^S-1-[0-9-]+$/.test(sid)) fail("Не удалось определить SID пользователя Windows для runtime-проверки.");
+    await atomicWriteFile(verifyLauncher, windowsVerifyLauncher(process.execPath, stableScript, codex));
+    await atomicWriteFile(taskXML, windowsRuntimeTaskXML(sid, verifyLauncher));
+    run("schtasks.exe", ["/Create", "/F", "/TN", RUNTIME_TASK_NAME, "/XML", taskXML]);
   } else if (platform() === "linux") {
     const systemd = linuxSystemd();
     const units = linuxUnits(process.execPath, stableScript, codex);
@@ -461,9 +483,11 @@ async function disableAutoupdate() {
     if (launchAgentLoaded(`gui/${process.getuid()}/ru.hobbyka.hub-updater`)) fail("Не удалось выгрузить автообновление: scheduler оставил job загруженным.");
     await rm(plist, { force: true });
   } else if (platform() === "win32") {
+    const runtimeResult = run("schtasks.exe", ["/Delete", "/F", "/TN", RUNTIME_TASK_NAME], undefined, true);
+    if (runtimeResult.error) fail(runtimeResult.error.message);
     const result = run("schtasks.exe", ["/Delete", "/F", "/TN", "Hobbyka Hub Auto Update"], undefined, true);
     if (result.error) fail(result.error.message);
-    if (windowsTaskPresent()) fail("Не удалось выгрузить автообновление: scheduler оставил задачу загруженной.");
+    if (windowsTaskPresent("Hobbyka Hub Auto Update") || windowsTaskPresent(RUNTIME_TASK_NAME)) fail("Не удалось выгрузить фоновые задачи Hobbyka Hub.");
   }
   else if (platform() === "linux") {
     const systemd = linuxSystemd();
@@ -484,6 +508,7 @@ async function copyUpdater(pluginRoot) {
   await mkdir(join(root, ".codex-plugin"), { recursive: true });
   await atomicCopyFile(join(pluginRoot, "bin", "hobbyka-hub.mjs"), join(root, "bin", "hobbyka-hub.mjs"));
   await atomicCopyFile(join(pluginRoot, "bin", "marketplace-state.mjs"), join(root, "bin", "marketplace-state.mjs"));
+  await atomicCopyFile(join(pluginRoot, "bin", "runtime-check.mjs"), join(root, "bin", "runtime-check.mjs"));
   await atomicCopyFile(join(pluginRoot, "assets", "hobbyka-chat-root.crt"), join(root, "assets", "hobbyka-chat-root.crt"));
   await atomicCopyFile(join(pluginRoot, ".codex-plugin", "plugin.json"), join(root, ".codex-plugin", "plugin.json"));
   await chmod(join(root, "bin", "hobbyka-hub.mjs"), 0o755);
@@ -574,6 +599,16 @@ async function cleanupPluginRoots(codexRoot, slug, activeRoot, previousRoot) {
   if (legacyRoot !== activeRoot && legacyRoot !== previousRoot) await rm(legacyRoot, { recursive: true, force: true });
 }
 
+async function restorePreviousPlugin(codexRoot, slug, previousRoot, failedRoot) {
+  if (!await hasPluginManifest(previousRoot)) fail(`Runtime-проверка ${slug} не прошла, а предыдущая версия недоступна для восстановления.`);
+  const source = `./${relative(codexRoot, previousRoot).split(sep).join("/")}`;
+  await configureMarketplace(codexRoot, { [slug]: source });
+  run(codexCommand(), ["plugin", "add", `${slug}@hobbyka-hub`]);
+  await runPostUpdateHook(previousRoot);
+  if (slug === "hobbyka-hub") await enableAutoupdate(true, previousRoot);
+  await rm(failedRoot, { recursive: true, force: true });
+}
+
 function managedMarketplace(marketplace, codexRoot) {
   const root = marketplace?.root ?? marketplace?.marketplaceSource?.source;
   return marketplace?.name === "hobbyka-hub" && typeof root === "string" && resolve(root) === resolve(codexRoot);
@@ -655,12 +690,17 @@ function launchAgentLoaded(target) {
   if (result.error) fail(result.error.message);
   return result.status === 0;
 }
-function windowsTaskPresent() {
-  const result = spawnSync("schtasks.exe", ["/Query", "/TN", "Hobbyka Hub Auto Update"], { stdio: "ignore" });
+function windowsTaskPresent(name = "Hobbyka Hub Auto Update") {
+  const result = spawnSync("schtasks.exe", ["/Query", "/TN", name], { stdio: "ignore" });
   if (result.error) fail(result.error.message);
   if (result.status === 0) return true;
   if (result.status === 1) return false;
   fail(`Не удалось определить состояние планировщика Windows: schtasks.exe завершился с кодом ${result.status}.`);
+}
+async function verifyUpdatedPlugin(slug) {
+  if (process.env.HOBBYKA_VERIFY_ACTIVE === "1") return;
+  const verification = await runRuntimeVerification(["--mode", "post-update", "--plugin", slug, "--json"]);
+  if (verification.exitCode !== 0) fail(`Runtime-проверка ${slug} после обновления завершилась неуспешно.`);
 }
 function systemdTimerPresent(systemd) {
   const result = spawnSync("systemctl", [...systemd.args, "show", "hobbyka-hub-updater.timer", "--property=LoadState,ActiveState,UnitFileState"], { encoding: "utf8" });

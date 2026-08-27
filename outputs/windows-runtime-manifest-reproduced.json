@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "label": "reproduced",
+  "captured_at": "2026-08-27T10:12:27.017911+00:00",
+  "command": [
+    "node",
+    "--test",
+    "plugins/hobbyka-hub/tests/manifest-links.test.mjs"
+  ],
+  "cwd": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827",
+  "runtime": "Python 3.9.6 on Darwin arm64",
+  "duration_ms": 65.119,
+  "exit_code": 1,
+  "timed_out": false,
+  "stdout": "\u2716 Hub manifest links point to Hub-owned pages (2.486792ms)\n\u2139 tests 1\n\u2139 suites 0\n\u2139 pass 0\n\u2139 fail 1\n\u2139 cancelled 0\n\u2139 skipped 0\n\u2139 todo 0\n\u2139 duration_ms 34.371958\n\n\u2716 failing tests:\n\ntest at plugins/hobbyka-hub/tests/manifest-links.test.mjs:5:1\n\u2716 Hub manifest links point to Hub-owned pages (2.486792ms)\n  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n  + actual - expected\n  \n  + 'https://10.8.1.0:8443/plugins/hobbyka-agent-chat'\n  - 'https://10.8.1.0:8443/plugins/hobbyka-hub'\n  \n      at TestContext.<anonymous> (file:///Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827/plugins/hobbyka-hub/tests/manifest-links.test.mjs:7:10)\n      at async Test.run (node:internal/test_runner/test:1113:7)\n      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:358:3) {\n    generatedMessage: true,\n    code: 'ERR_ASSERTION',\n    actual: 'https://10.8.1.0:8443/plugins/hobbyka-agent-chat',\n    expected: 'https://10.8.1.0:8443/plugins/hobbyka-hub',\n    operator: 'strictEqual',\n    diff: 'simple'\n  }\n",
+  "stderr": "",
+  "stdout_truncated": false,
+  "stderr_truncated": false,
+  "secrets_redacted": true
+}
