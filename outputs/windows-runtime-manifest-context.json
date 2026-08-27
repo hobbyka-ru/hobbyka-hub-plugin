@@ -1,0 +1,74 @@
+{
+  "title": "Hub 0.4.38 links to Agent Chat metadata pages",
+  "project": "Hobbyka Hub",
+  "generated_at": "2026-08-27",
+  "mode": "prove-fix",
+  "original_report": "The Hobbyka Hub 0.4.38 manifest sends its website, privacy, and terms links to Hobbyka Agent Chat instead of Hub-owned pages.",
+  "discovery_scope": [
+    "Hobbyka Hub plugin manifest",
+    "Hub-owned privacy and terms documents",
+    "runtime cross-plugin link regression"
+  ],
+  "candidates": [],
+  "expected": "Every public metadata link in the Hub manifest identifies Hobbyka Hub and opens a Hub-owned page.",
+  "actual": "All three links in 0.4.38 identified or opened Hobbyka Agent Chat resources.",
+  "environment": "macOS regression fixture, Node.js 24, Hobbyka Hub 0.4.38",
+  "reproduction": "A focused manifest regression compares the three public links with exact Hub-owned destinations.",
+  "failure_signal": "The focused test failed because websiteURL ended in /plugins/hobbyka-agent-chat and both policy links targeted the Agent Chat repository path.",
+  "root_cause": "Hub copied Agent Chat interface metadata into its own manifest and had no cross-plugin link regression.",
+  "fix_summary": "Replaced the three links, added Hub-owned privacy and terms documents, bumped the candidate to 0.4.39, and kept the exact-link regression in the Hub suite.",
+  "why_causal": "The manifest now owns each destination and the same exact assertion changes from exit 1 to exit 0.",
+  "reproduction_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827/plugins/hobbyka-hub/tests/manifest-links.test.mjs",
+      "line": 5,
+      "summary": "Exact cross-plugin metadata regression."
+    }
+  ],
+  "fix_files": [
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827/plugins/hobbyka-hub/.codex-plugin/plugin.json",
+      "line": 12,
+      "summary": "Hub-owned website, privacy, and terms destinations."
+    },
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827/plugins/hobbyka-hub/PRIVACY.md",
+      "line": 1,
+      "summary": "Hub privacy document."
+    },
+    {
+      "path": "/Users/ardanila/code/hobbyka-ru/_worktrees/hub-windows-runtime-verifier-20260827/plugins/hobbyka-hub/TERMS.md",
+      "line": 1,
+      "summary": "Hub terms document."
+    }
+  ],
+  "checks": [
+    {
+      "name": "Focused regression",
+      "status": "passed",
+      "detail": "The same command changed from exit 1 to exit 0."
+    },
+    {
+      "name": "Full Hub tests",
+      "status": "passed",
+      "detail": "52 of 52 tests passed."
+    },
+    {
+      "name": "Hub self-test",
+      "status": "passed",
+      "detail": "hobbyka-hub self-test: ok."
+    }
+  ],
+  "reproduce": [
+    "node --test plugins/hobbyka-hub/tests/manifest-links.test.mjs",
+    "node --test plugins/hobbyka-hub/tests/*.test.mjs",
+    "node plugins/hobbyka-hub/bin/hobbyka-hub.mjs self-test"
+  ],
+  "limitations": [
+    "The 0.4.39 candidate still requires validation through the pinned Windows runner; the Windows host was unreachable over LAN and VPN during this capture."
+  ],
+  "residual_risks": [],
+  "notes": [
+    "No release, merge, or publish was performed."
+  ]
+}
