@@ -86,3 +86,42 @@ esac
     await rm(fixture, { recursive: true, force: true });
   }
 });
+
+test("public self-update never downgrades a newer Hub installed from the internal catalog", async () => {
+  const fixture = await mkdtemp(join(tmpdir(), "hobbyka-public-no-downgrade-"));
+  const currentRoot = join(fixture, ".codex", "hobbyka-hub-marketplace", "plugins", "hobbyka-hub");
+  const preload = join(fixture, "fetch-mock.mjs");
+  const codex = join(fixture, "codex");
+  const trace = join(fixture, "fetch.trace");
+  try {
+    await mkdir(join(currentRoot, ".codex-plugin"), { recursive: true });
+    await writeFile(join(currentRoot, ".codex-plugin", "plugin.json"), JSON.stringify({ name: "hobbyka-hub", version: "0.4.39", description: "current" }), "utf8");
+    await writeFile(preload, `
+import { appendFile } from "node:fs/promises";
+const trace = ${JSON.stringify(trace)};
+globalThis.fetch = async (input) => {
+  const url = String(input);
+  await appendFile(trace, url + "\\n");
+  if (url.includes("/commits/main")) return new Response(JSON.stringify({ sha: ${JSON.stringify(revision)} }));
+  if (url.includes("raw.githubusercontent.com")) return new Response(JSON.stringify({ version: "0.4.38" }));
+  if (url.endsWith("/api/plugins")) return new Response(JSON.stringify({ plugins: [] }));
+  return new Response("not found", { status: 404 });
+};
+`, "utf8");
+    await writeFile(codex, `#!/bin/sh
+case "$*" in
+  'plugin list --json') printf '%s\\n' '{"installed":[]}' ;;
+  'plugin marketplace list --json') printf '%s\\n' '{"marketplaces":[]}' ;;
+esac
+`, { mode: 0o755 });
+    const result = spawnSync(process.execPath, ["--import", preload, cli, "update", "--quiet"], {
+      env: { ...process.env, HOME: fixture, HOBBYKA_CODEX_COMMAND: codex, HOBBYKA_HUB_CA_READY: "1" },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
+    assert.equal(JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8")).version, "0.4.39");
+    assert.doesNotMatch(await readFile(trace, "utf8"), /\/archive\//);
+  } finally {
+    await rm(fixture, { recursive: true, force: true });
+  }
+});

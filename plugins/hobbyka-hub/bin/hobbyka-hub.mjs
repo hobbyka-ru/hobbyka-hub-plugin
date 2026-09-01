@@ -36,7 +36,7 @@ if (!process.env.NODE_EXTRA_CA_CERTS && !process.env.HOBBYKA_HUB_CA_READY) {
 }
 
 const [command, ...args] = process.argv.slice(2);
-const base = (process.env.HOBBYKA_HUB_URL ?? "https://10.8.1.0:8443").replace(/\/$/, "");
+const base = (process.env.HOBBYKA_HUB_URL ?? "https://hub.hobbyka.internal").replace(/\/$/, "");
 const agentChat = (process.env.HOBBYKA_AGENT_CHAT_URL ?? "https://172.29.172.1").replace(/\/$/, "");
 const publicHub = "https://github.com/hobbyka-ru/hobbyka-hub-plugin";
 const publicHubAPI = "https://api.github.com/repos/hobbyka-ru/hobbyka-hub-plugin";
@@ -46,6 +46,7 @@ const reportPreviewRoot = join(tmpdir(), "hobbyka-hub-report-previews");
 const reportPreviewMaxAgeMs = 24 * 60 * 60 * 1000;
 if (command === "report-bug") await submitReport(args, "bug");
 else if (command === "idea") await submitReport(args, "idea");
+else if (command === "status") await status();
 else if (command === "install") await withMarketplaceLock(marketplaceRoot, () => installAndReconcile(args[0]));
 else if (command === "publish") await publish(parsePublishArgs(args));
 else if (command === "propose") await propose(args[0], args.includes("--submit"), args.find((arg, index) => index > 0 && !arg.startsWith("--")));
@@ -54,7 +55,21 @@ else if (command === "repair") await withMarketplaceLock(marketplaceRoot, () => 
 else if (command === "autoupdate" && args[0] === "enable") await withMarketplaceLock(marketplaceRoot, () => enableAutoupdate());
 else if (command === "autoupdate" && args[0] === "disable") await withMarketplaceLock(marketplaceRoot, () => disableAutoupdate());
 else if (command === "self-test") await selfTest();
-else fail("Использование:\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable");
+else fail("Использование:\n  hobbyka-hub status\n  hobbyka-hub report-bug (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub idea (--stdin | --body-file PATH) [--file PATH] [--operation UUID] [--confirm]\n  hobbyka-hub install <slug>\n  hobbyka-hub publish <папка-плагина>\n  hobbyka-hub propose <slug> [папка]\n  hobbyka-hub propose <папка> --submit\n  hobbyka-hub update\n  hobbyka-hub repair\n  hobbyka-hub autoupdate enable|disable");
+
+async function status() {
+  const [catalogResponse, profileResponse] = await Promise.all([
+    hubFetch(`${base}/api/plugins`),
+    hubFetch(`${base}/api/profile`),
+  ]);
+  if (!catalogResponse.ok) fail(await catalogResponse.text());
+  if (!profileResponse.ok) fail(await profileResponse.text());
+  const catalog = await catalogResponse.json();
+  const profile = await profileResponse.json();
+  const employeeID = profile?.user?.identityId;
+  if (!employeeID || !Array.isArray(catalog?.plugins)) fail("ХАБ вернул неполный статус.");
+  console.log(`ХАБ доступен: ${employeeID}, плагинов: ${catalog.plugins.length}.`);
+}
 
 async function submitReport(args, kind) {
   const parsed = parseReportArgs(args);
@@ -336,6 +351,7 @@ async function updatePublicHub(quiet) {
   } catch (error) { fail(`Не удалось проверить обновление Hobbyka Hub: ${error.message}`); }
   const current = JSON.parse(await readFile(join(currentRoot, ".codex-plugin", "plugin.json"), "utf8"));
   if (latest.version === current.version) return false;
+  if (compareVersions(latest.version, current.version) < 0) return false;
   let response;
   try { response = await fetch(`${publicHub}/archive/${revision}.zip?t=${cacheBuster}`, { cache: "no-store" }); }
   catch (error) { fail(`Не удалось скачать обновление Hobbyka Hub: ${error.message}`); }
@@ -360,6 +376,15 @@ async function updatePublicHub(quiet) {
     if (!quiet) console.log(`Hobbyka Hub обновлён до ${latest.version}.`);
     return true;
   } finally { await rm(temp, { recursive: true, force: true }); }
+}
+
+function compareVersions(left, right) {
+  const versions = [left, right].map((value) => /^(\d+)\.(\d+)\.(\d+)$/.exec(value ?? "")?.slice(1).map(Number));
+  if (versions.some((value) => !value)) return 0;
+  for (let index = 0; index < 3; index += 1) {
+    if (versions[0][index] !== versions[1][index]) return versions[0][index] - versions[1][index];
+  }
+  return 0;
 }
 
 async function propose(value, submit, destination) {
